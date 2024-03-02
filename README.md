@@ -2,6 +2,7 @@
 Post-HCP processing code for the Transdiagnostic Connectome Project (TCP) dataset release, 2024
 
 <hr>
+# About the TCP data release
 Title: The Transdiagnostic Connectome Project: a richly phenotyped open dataset for advancing the study of brain-behavior relationships in psychiatry
 
 Authors:
@@ -28,8 +29,4 @@ Affiliations:
 18.	Martinos Center for Biomedical Imaging, Massachusetts General Hospital, Charlestown, USA
 
 $ These authors contributed equally to this work.
-
-
-
-
-2024
+<hr>
