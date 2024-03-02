@@ -7,9 +7,9 @@ Post-HCP processing code for the Transdiagnostic Connectome Project (TCP) datase
 **Title**: The Transdiagnostic Connectome Project: a richly phenotyped open dataset for advancing the study of brain-behavior relationships in psychiatry
 
 **Authors**:  
-Sidhant Chopra<sup>$1,2</sup>, Carrisa V. Cocuzza$1,2, Connor Lawhead$1,3, Jocelyn A. Ricard1,4, Loïc Labache1,2, Lauren Patrick1,5, Poornima Kumar6,7, Arielle Rubenstein1, Julia Moses1, Lia Chen8, Crystal Blankenbaker9, Bryce Gillis10,11, Laura T. Germine10,11, Ilan Harpaz-Rote1,12,13, BT Thomas Yeo14-18, Justin T. Baker10,11, Avram J. Holmes1,2
+Sidhant Chopra<sup>$1,2</sup>, Carrisa V. Cocuzza<sup>$1,2</sup>, Connor Lawhead<sup>$1,3</sup>, Jocelyn A. Ricard<sup>1,4</sup>, Loïc Labache<sup>1,2</sup>, Lauren Patrick<sup>1,5</sup>, Poornima Kumar<sup>6,7</sup>, Arielle Rubenstein<sup>1</sup>, Julia Moses<sup>1</sup>, Lia Chen<sup>8</sup>, Crystal Blankenbaker<sup>9</sup>, Bryce Gillis<sup>10,11</sup>, Laura T. Germine<sup>10,11</sup>, Ilan Harpaz-Rote<sup>1,12,13</sup>, BT Thomas Yeo<sup>14-18</sup>, Justin T. Baker<sup>10,11</sup>, Avram J. Holmes<sup>1,2</sup>   
 
-Affiliations: 
+**Affiliations**:   
 1.	Department of Psychology, Yale University, New Haven, CT, USA
 2.	Department of Psychiatry, Brain Health Institute, Rutgers University, Piscataway, NJ, USA
 3.	Department of Psychology, Stony Brook University, Stony Brook, NY, USA
@@ -18,7 +18,7 @@ Affiliations:
 6.	Department of Psychiatry, Harvard Medical School, Boston, USA
 7.	Centre for Depression, Anxiety and Stress Research, McLean Hospital, Boston, USA
 8.	Department of Psychology, Cornell University, Ithaca, NY, USA
-9.	Crystal Blankenbaker 
+9.	(tba)
 10.	Department of Psychiatry, Harvard Medical School, Boston, USA
 11.	Institute for Technology in Psychiatry, McLean Hospital, Boston, USA
 12.	Department of Psychiatry, Yale University, New Haven, USA 
