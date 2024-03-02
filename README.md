@@ -37,13 +37,15 @@ An important aim in psychiatry is the establishment of valid and reliable associ
 In doing so, we provide a comprehensive and analysis-ready transdiagnostic dataset which we hope  will contribute to the identification of illness-relevant biotypes, the establishment of brain-behavior associations, and progress in the development of personalized therapeutic interventions.
 
 <hr>
-<h>About the repository:</h>
+<h1>About the repository:</h1>
+
 1. /HolmesLab/TransdiagnosticConnectomeProject/docs/: documents, e.g., TCP manuscript, supplemental information, etc.
 2. /HolmesLab/TransdiagnosticConnectomeProject/figures/: figures from the manuscript
 3. /HolmesLab/TransdiagnosticConnectomeProject/scripts/: post-minimal-processing scripts, e.g., parcellation, functional connectivity (FC) estimation, global signal regression (GSR), framewise displacement (FD), etc.
 
 <hr>
-<h>Supporting workflows and open source tools:</h>
+<h1>Supporting workflows and open source tools:</h1>
+
 1. HCP minimal processing: https://github.com/Washington-University/HCPpipelines
 2. Brain network metrics (python): https://github.com/aestrivex/bctpy
 3. Cortical parcellation atlas: https://github.com/ThomasYeoLab/CBIG/tree/master/stable_projects/brain_parcellation/Yan2023_homotopic
