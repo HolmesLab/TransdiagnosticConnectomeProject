@@ -2,9 +2,9 @@
 Post-HCP processing code for the Transdiagnostic Connectome Project (TCP) dataset release, 2024
 
 <hr>
-# About the TCP data release    
+<h1>About the TCP data release </h1>   
 
-Title: The Transdiagnostic Connectome Project: a richly phenotyped open dataset for advancing the study of brain-behavior relationships in psychiatry
+**Title**: The Transdiagnostic Connectome Project: a richly phenotyped open dataset for advancing the study of brain-behavior relationships in psychiatry
 
 Authors:
 Sidhant Chopra$1,2, Carrisa V. Cocuzza$1,2, Connor Lawhead$1,3, Jocelyn A. Ricard1,4, Loïc Labache1,2, Lauren Patrick1,5, Poornima Kumar6,7, Arielle Rubenstein1, Julia Moses1, Lia Chen8, Crystal Blankenbaker9, Bryce Gillis10,11, Laura T. Germine10,11, Ilan Harpaz-Rote1,12,13, BT Thomas Yeo14-18, Justin T. Baker10,11, Avram J. Holmes1,2
