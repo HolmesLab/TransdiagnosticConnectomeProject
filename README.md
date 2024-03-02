@@ -14,7 +14,7 @@ Sidhant Chopra<sup>$1,2</sup>, Carrisa V. Cocuzza<sup>$1,2</sup>, Connor Lawhead
 2.	Department of Psychiatry, Brain Health Institute, Rutgers University, Piscataway, NJ, USA
 3.	Department of Psychology, Stony Brook University, Stony Brook, NY, USA
 4.	Stanford Neurosciences Interdepartmental Program, Stanford University School of Medicine, Stanford, CA, USA
-5.	Lauren UPenn 
+5.	(tba) 
 6.	Department of Psychiatry, Harvard Medical School, Boston, USA
 7.	Centre for Depression, Anxiety and Stress Research, McLean Hospital, Boston, USA
 8.	Department of Psychology, Cornell University, Ithaca, NY, USA
