@@ -30,4 +30,24 @@ Sidhant Chopra<sup>$1,2</sup>, Carrisa V. Cocuzza<sup>$1,2</sup>, Connor Lawhead
 18.	Martinos Center for Biomedical Imaging, Massachusetts General Hospital, Charlestown, USA
 
 $ These authors contributed equally to this work.
+
+**Abstract:**   
+An important aim in psychiatry is the establishment of valid and reliable associations linking profiles of  brain functioning to clinically-relevant symptoms and behaviors across patient populations. To advance progress in this area, we introduce an open dataset containing behavioral and neuroimaging data from 244 individuals aged 18 to 70, including 149 meeting diagnostic criteria for a broad range of psychiatric illnesses and a healthy comparison group of 95 individuals. These data include high-resolution anatomical scans and multiple resting-state and task-based functional MRI runs. Additionally, participants completed over 50 psychological and cognitive assessments. Here, we detail available behavioral data as well as raw and processed analysis-ready MRI derivatives. Associations between data processing and quality metrics, such as head motion, are reported. Processed data exhibit classic task activation effects and canonical functional network organization. 
+
+In doing so, we provide a comprehensive and analysis-ready transdiagnostic dataset which we hope  will contribute to the identification of illness-relevant biotypes, the establishment of brain-behavior associations, and progress in the development of personalized therapeutic interventions.
+
+<hr>
+<h>About the repository:</h>
+1. /HolmesLab/TransdiagnosticConnectomeProject/docs/: documents, e.g., TCP manuscript, supplemental information, etc.
+2. /HolmesLab/TransdiagnosticConnectomeProject/figures/: figures from the manuscript
+3. /HolmesLab/TransdiagnosticConnectomeProject/scripts/: post-minimal-processing scripts, e.g., parcellation, functional connectivity (FC) estimation, global signal regression (GSR), framewise displacement (FD), etc.
+
+<hr>
+<h>Supporting workflows and open source tools:</h>
+1. HCP minimal processing: https://github.com/Washington-University/HCPpipelines
+2. Brain network metrics (python): https://github.com/aestrivex/bctpy
+3. Cortical parcellation atlas: https://github.com/ThomasYeoLab/CBIG/tree/master/stable_projects/brain_parcellation/Yan2023_homotopic
+4. Subcortical parcellation atlas: https://github.com/yetianmed/subcortex
+5. Cerebellar parcellation atlas: https://github.com/DiedrichsenLab/cerebellar_atlases
+
 <hr>
