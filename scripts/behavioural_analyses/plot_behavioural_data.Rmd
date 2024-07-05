@@ -1,0 +1,962 @@
+---
+title: 'TCP data-release-behaviour figures'
+output: html_notebook
+---
+
+
+```{r}
+library(reticulate)
+np <- import("numpy")
+library(svglite)
+library(pbapply)
+library(parallel)
+library(patchwork)
+library(superheat)
+library(pals)
+library(magick)
+library(ggplot2)
+library(ggeasy)
+library(ggpubr)
+library(patchwork)
+library(psych)
+library(abind)
+library(data.table)
+library(ggplotify)
+library(rcartocolor)
+library(bio3d)
+library(corrplot)
+library(here)
+library(dplyr)
+source("~/Dropbox/Sid/R_files/functions/vec_2_mat.R")
+source("~/Dropbox/Sid/R_files/functions/mat_2_vec.R")
+rgb2hex <- function(r, g, b) rgb(r, g, b, maxColorValue = 255)
+cor2 <- \(x) {
+  1 / (NROW(x) - 1) * crossprod(scale(x, TRUE, TRUE))
+}
+labs <- readxl::read_excel("../data/brain/whole_brain_region_network_order_info_TCP_release.xlsx")
+```
+
+
+```{r load in data}
+all_merge <- readRDS("../output/behav_data_prep/all_merge.RDS")
+all_merge_noTrans <- readRDS("../output/behav_data_prep/all_merge_noTrans.RDS")
+demos <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/demos.csv"), header = T, skip = 1, fileEncoding = "latin1")
+demos[demos == 999] <- NA
+clean_names <- readxl::read_excel("../data/behaviour/clean_names.xlsx", )[, 3]
+colnames(all_merge_noTrans)[-1] <- unlist(c(clean_names))
+colnames(all_merge)[-1] <- unlist(c(clean_names))
+
+
+# write out demos file for yeo data shareing
+names(demos)
+selected_cols <- c("subjectkey", "interview_age", "sex", "Site", "Group", "Primary_Dx_clean")
+demos_tmp <- demos[, selected_cols]
+write.csv(demos_tmp, "~/Dropbox/Sid/python_files/Thomas_MRIeconomics/sharing/TCP/behaviour/demogs.csv")
+```
+
+```{r sup table of all variables}
+# library(gtExtras) #too low res as it requires webshot of .html
+# library(gt)
+# table1 <- gt_plt_summary(all_merge_noTrans[,1:54], "Scales and Sub-scales")
+#
+# table2 <- gt_plt_summary(all_merge_noTrans[,55:108], "Scales and Sub-scales")
+#
+# gtsave_extra(table1,filename = #"./output/behav_data_prep/figures/summary_table_pt1.png", zoom = 50)
+# gtsave(table2,filename = #"./output/behav_data_prep/figures/summary_table_pt2.docx")
+
+
+
+library(dplyr)
+library(kableExtra)
+library(tidyr)
+library(magrittr)
+library(flextable)
+
+your_data <- all_merge_noTrans[, 2:ncol(all_merge_noTrans)]
+# Assuming your data frame is named 'your_data'
+your_data <- apply(your_data, 2, as.numeric)
+your_data <- as.data.frame(your_data)
+
+# Reshape the data to long format
+your_data_long <- your_data %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Value")
+
+# Create a summary table with the desired statistics
+summary_table <- your_data_long %>%
+  group_by(Variable) %>%
+  summarise(
+    "Missing (%)" = round(mean(is.na(Value)) * 100, 2),
+    Median = round(median(Value, na.rm = TRUE), 2),
+    Mean = round(mean(Value, na.rm = TRUE), 2),
+    Min = round(min(Value, na.rm = TRUE), 2),
+    Max = round(max(Value, na.rm = TRUE), 2),
+  )
+
+
+flextable(summary_table) %>%
+  save_as_docx(path = "./output/behav_data_prep/figures/summary_table.docx")
+
+
+
+# Create a Word document with a neat table using kableExtra
+# again not great res, need flesitable
+# kable(summary_table, format = "html", caption = "Summary Statistics") %>%
+#  kable_styling() %>%
+#  save_kable("./output/behav_data_prep/figures/summary_table.pdf")
+```
+
+```{r scale to scale correlation}
+library(svglite)
+library(corrplot)
+demos <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/demos.csv"), header = T, skip = 1, fileEncoding = "latin1")
+demos[demos == 999] <- NA
+
+all_merge <- readRDS(here("./output/behav_data_prep/all_merge.RDS"))
+all_merge_noTrans <- readRDS(here("./output/behav_data_prep/all_merge_noTrans.RDS"))
+
+clean_names <- readxl::read_excel("./data/behaviour/clean_names.xlsx")
+colnames(all_merge) <- c("subjectkey", clean_names$acro)
+
+all_merge_demos <- all_merge |>
+  full_join(demos[, c("subjectkey", "sex", "Site", "Group")], by = "subjectkey")
+all_merge_demos$FTND <- NULL
+all_merge$FTND <- NULL
+
+
+all_merge_demos_hc <- all_merge_demos[all_merge_demos$Group == "GenPop", ]
+all_merge_demos_hc <- all_merge_demos_hc[, !(names(all_merge_demos_hc) %in% c("sex", "Site", "Group"))]
+all_merge_demos_hc <- all_merge_demos_hc[rowSums(is.na(all_merge_demos_hc)) != ncol(all_merge_demos_hc), ]
+all_merge_demos_hc <- all_merge_demos_hc[, colSums(is.na(all_merge_demos_hc)) != nrow(all_merge_demos_hc)]
+
+all_merge_demos_patient <- all_merge_demos[all_merge_demos$Group == "Patient", ]
+all_merge_demos_patient <- all_merge_demos_patient[, !(names(all_merge_demos_patient) %in% c("sex", "Site", "Group"))]
+all_merge_demos_patient <- all_merge_demos_patient[rowSums(is.na(all_merge_demos_patient)) != ncol(all_merge_demos_patient), ]
+all_merge_demos_patient <- all_merge_demos_patient[, colSums(is.na(all_merge_demos_patient)) != nrow(all_merge_demos_patient)]
+
+all_merge_corplot <- cor(scale(all_merge_demos_hc[, -1]), use = "pairwise.complete.obs")
+all_merge_corplot.dist <- stats::as.dist(1 - all_merge_corplot)
+
+h.clust_ordering <- hclust(all_merge_corplot.dist, method = "average")$order
+
+all_merge_corplot_hc <- cor(scale(all_merge_demos_hc[, -1]), use = "pairwise.complete.obs")
+all_merge_corplot_patient <- cor(scale(all_merge_demos_patient[, -1]), use = "pairwise.complete.obs")
+
+cor(all_merge_corplot_hc[upper.tri(all_merge_corplot_hc)], all_merge_corplot_patient[upper.tri(all_merge_corplot_patient)])
+
+svglite(filename = "./output/behav_data_prep/figures/subscales_all_transformed_hclust_hc_lt_hc.svg", width = 4, height = 4)
+colnames(all_merge_corplot_hc) <- rep(" ", NROW(all_merge_corplot_hc)) #
+corrplot(all_merge_corplot_hc[h.clust_ordering, h.clust_ordering],
+  tl.cex = 0.2,
+  method = "color",
+  tl.srt = 25,
+  col = rev(pals::brewer.rdbu(1000)),
+  cl.cex = 1,
+  tl.col = "black", diag = F, type = "lower"
+)
+dev.off()
+
+
+svglite(filename = "./output/behav_data_prep/figures/subscales_all_transformed_hclust_hc_ut_pat.svg", width = 4, height = 4)
+rownames(all_merge_corplot_patient) <- rep(" ", NROW(all_merge_corplot_patient)) #
+corrplot(all_merge_corplot_patient[h.clust_ordering, h.clust_ordering],
+  tl.cex = 0.2,
+  method = "color",
+  tl.srt = 45,
+  col = rev(pals::brewer.rdbu(1000)),
+  cl.cex = 1,
+  cl.pos = "n",
+  tl.col = "black", type = "upper",
+  diag = F,
+  bg = "transparent"
+)
+dev.off()
+```
+
+```{r correlate subject to subject}
+all_merge_scaled <- apply(all_merge[, -1], 2, scale)
+all_merge_corplot_subj <- cor(t(all_merge_scaled), use = "pairwise.complete.obs", method = "spearman")
+
+Dx_order <- demos$Primary_Dx_clean
+Dx_order_ind <- order(Dx_order)
+corrplot(all_merge_corplot_subj,
+  tl.cex = 0.3,
+  method = "color",
+  order = "hclust",
+  tl.srt = 45,
+  col = rev(pals::brewer.rdbu(1000)),
+  cl.cex = 1,
+  tl.col = "black", type = "full", diag = F, bg = "transparent"
+)
+id <- Dx_order[order(Dx_order)]
+id[is.na(id)] <- "HC"
+id <- as.numeric(factor(id))
+superheat(X = all_merge_corplot_subj[Dx_order_ind, Dx_order_ind], membership.rows = id, membership.cols = id)
+```
+
+
+```{r plot CTQ}
+library(fmsb)
+library(stringr)
+
+radar_data <- all_merge_demos %>%
+  filter(!is.na(Group)) %>%
+  group_by(Group) %>%
+  summarise(across(starts_with("CTQ"), ~ mean(., na.rm = TRUE)))
+radar_data <- as.data.frame(radar_data)
+radar_data[, -1] <- apply(radar_data[, -1], 2, as.numeric)
+row.names(radar_data) <- radar_data[, 1]
+radar_data <- radar_data[, -1]
+colnames(radar_data) <- str_remove(colnames(radar_data), "Childhood Trauma Questionnaire Core ")
+colnames(radar_data) <- str_remove(colnames(radar_data), "Subscale")
+
+max_vals <- c(apply(radar_data, 2, max) * 1.4) # added a 10% buffer
+min_vals <- c(rep(0, ncol(radar_data)))
+radar_data <- rbind(max_vals, min_vals, radar_data)
+
+colors_border <- c(rgb(0.2, 0.5, 0.5, 0.9), rgb(0.8, 0.2, 0.5, 0.9))
+colors_in <- c(rgb(0.2, 0.5, 0.5, 0.4), rgb(0.8, 0.2, 0.5, 0.4))
+
+colnames(radar_data) <- c("Emotional Abuse", "Emotional Neglect", "Physical Abuse", "Physical Neglect", "Sexual Abuse", "Verbal Abuse")
+
+svglite(filename = here("./output/behav_data_prep/figures/CTQ_radarplot.svg"), width = 7, height = 7)
+radarchart(radar_data,
+  axistype = 1,
+  # custom polygon
+  pcol = colors_border, plwd = 3, plty = 1, pfcol = colorspace::adjust_transparency(colors_border, 0.2),
+  # custom the grid
+  cglcol = "grey",
+  cglty = 1,
+  axislabcol = "grey",
+  caxislabels = seq(min(radar_data), max(radar_data), round(max(radar_data) / 5, 2)),
+  cglwd = 1,
+  # custom labels
+  vlcex = 1.2,
+  title = "Childhood Trauma Questionnaire",
+)
+dev.off()
+legend(
+  x = 0.7, y = 1.3, legend = rownames(radar_data[-c(1, 2), ]),
+  bty = "n", pch = 20, col = colors_in, cex = 2.2, pt.cex = 3
+)
+```
+
+
+```{r plot TMB}
+library(fmsb)
+
+radar_data <- all_merge_demos %>%
+  filter(!is.na(Group)) %>%
+  group_by(Group) %>%
+  summarise(across(starts_with("TMB-"), ~ mean(., na.rm = TRUE)))
+radar_data <- as.data.frame(radar_data)
+
+radar_data[, -1] <- apply(radar_data[, -1], 2, as.numeric)
+row.names(radar_data) <- radar_data[, 1]
+radar_data <- radar_data[, -1]
+
+# colnames(radar_data) <- str_remove(colnames(radar_data),"Test My Brain - ")
+# colnames(radar_data) <- str_remove(colnames(radar_data),"Score")
+
+max_vals <- c(apply(radar_data, 2, max) * 1.4) # added a 10% buffer
+min_vals <- c(rep(-.2, ncol(radar_data)))
+radar_data <- rbind(max_vals, min_vals, radar_data)
+
+colors_border <- c(rgb(0.2, 0.5, 0.5, 0.9), rgb(0.8, 0.2, 0.5, 0.9))
+colors_in <- c(rgb(0.2, 0.5, 0.5, 0.4), rgb(0.8, 0.2, 0.5, 0.4))
+
+colnames(radar_data) <- c("DigitSymbol", "ChoiceRT", "FastRT", "ContPerform", "ReadingMind", "MatrixReason", "WordAssoc")
+
+svglite(filename = here("./output/behav_data_prep/figures/TMB_radarplot.svg"), width = 8, height = 7)
+
+radarchart(radar_data,
+  axistype = 1,
+  # custom polygon
+  pcol = colors_border, plwd = 3, plty = 1,
+  pfcol = colorspace::adjust_transparency(colors_border, 0.2),
+  # custom the grid
+  cglcol = "grey",
+  cglty = 1,
+  axislabcol = "grey",
+  cglwd = 1,
+  # custom labels
+  caxislabels = seq(min(radar_data), max(radar_data), round(max(radar_data) / 5, 2)),
+  vlcex = 1.2,
+  title = "Test My Brain",
+)
+
+dev.off()
+legend(
+  x = 0.7, y = 1.3, legend = rownames(radar_data[-c(1, 2), ]),
+  bty = "n", pch = 20, col = colors_in, cex = 2.2, pt.cex = 3
+)
+```
+
+
+```{r plot NEO}
+library(fmsb)
+
+radar_data <- all_merge_demos %>%
+  filter(!is.na(Group)) %>%
+  group_by(Group) %>%
+  summarise(across(starts_with("NEO"), ~ mean(., na.rm = TRUE)))
+radar_data <- as.data.frame(radar_data)
+
+radar_data[, -1] <- apply(radar_data[, -1], 2, as.numeric)
+row.names(radar_data) <- radar_data[, 1]
+radar_data <- radar_data[, -1]
+
+colnames(radar_data) <- str_remove(colnames(radar_data), "NEO Personality Inventory-2")
+colnames(radar_data) <- str_remove(colnames(radar_data), "Score")
+
+max_vals <- c(apply(radar_data, 2, max) * 1.4) # added a 10% buffer
+min_vals <- c(rep(0, ncol(radar_data)))
+radar_data <- rbind(max_vals, min_vals, radar_data)
+
+colors_border <- c(rgb(0.2, 0.5, 0.5, 0.9), rgb(0.8, 0.2, 0.5, 0.9))
+colors_in <- c(rgb(0.2, 0.5, 0.5, 0.4), rgb(0.8, 0.2, 0.5, 0.4))
+
+colnames(radar_data) <- c("Agreeableness", "Conscientiousness", "Extraversion", "Neuroticism", "Openness")
+
+svglite(filename = here("./output/behav_data_prep/figures/NEO_radarplot.svg"), width = 8, height = 7)
+
+radarchart(radar_data,
+  axistype = 1,
+  # custom polygon
+  pcol = colors_border, plwd = 3, plty = 1,
+  # custom the grid
+  pfcol = colorspace::adjust_transparency(colors_border, 0.2),
+  cglcol = "grey",
+  cglty = 1,
+  axislabcol = "grey",
+  cglwd = 1,
+  # custom labels
+  caxislabels = seq(min(radar_data), max(radar_data), round(max(radar_data) / 5)),
+  vlcex = 1.2,
+  title = "NEO Personality Inventory",
+)
+dev.off()
+
+legend(
+  x = 0.7, y = 1.3, legend = rownames(radar_data[-c(1, 2), ]),
+  bty = "n", pch = 20, col = colors_in, cex = 2.2, pt.cex = 3
+)
+```
+
+
+```{r plot CERQ}
+library(fmsb)
+
+radar_data <- all_merge_demos %>%
+  filter(!is.na(Group)) %>%
+  group_by(Group) %>%
+  summarise(across(starts_with("CERQ"), ~ mean(., na.rm = TRUE)))
+radar_data <- as.data.frame(radar_data)
+
+radar_data[, -1] <- apply(radar_data[, -1], 2, as.numeric)
+row.names(radar_data) <- radar_data[, 1]
+radar_data <- radar_data[, -1]
+
+colnames(radar_data) <- str_remove(colnames(radar_data), "Cognitive Emotion Regulation Questionnaire ")
+colnames(radar_data) <- str_remove(colnames(radar_data), "Subscale")
+
+max_vals <- c(apply(radar_data, 2, max) * 1.4) # added a 10% buffer
+min_vals <- c(rep(0, ncol(radar_data)))
+radar_data <- rbind(max_vals, min_vals, radar_data)
+
+colors_border <- c(rgb(0.2, 0.5, 0.5, 0.9), rgb(0.8, 0.2, 0.5, 0.9))
+colors_in <- c(rgb(0.2, 0.5, 0.5, 0.4), rgb(0.8, 0.2, 0.5, 0.4))
+
+colnames(radar_data) <- c("SelfBlame", "Acceptance", "Ruminate", "PosRefocus", "RefocusPlan", "PosAppraise", "Perspective", "Catastrophe", "OtherBlame")
+svglite(filename = here("./output/behav_data_prep/figures/CERQ_radarplot.svg"), width = 8, height = 7)
+radarchart(radar_data,
+  axistype = 1,
+  # custom polygon
+  pcol = colors_border, plwd = 3, plty = 1,
+  pfcol = colorspace::adjust_transparency(colors_border, 0.2),
+  # custom the grid
+  cglcol = "grey",
+  cglty = 1,
+  axislabcol = "grey",
+  cglwd = 1,
+  # custom labels
+  vlcex = 1.2,
+  caxislabels = seq(min(radar_data), max(radar_data), round(max(radar_data) / 5)),
+  title = "Cognitive Emotion Regulation Questionnaire",
+)
+dev.off()
+legend(
+  x = 0.7, y = 1.3, legend = rownames(radar_data[-c(1, 2), ]),
+  bty = "n", pch = 20, col = colors_in, cex = 2.2, pt.cex = 3
+)
+```
+
+
+```{r plot demogs for figure 1 - Diagnosis}
+primary_dx <- demos$Primary_Dx_clean
+primary_dx[is.na(primary_dx)] <- "None"
+
+map_acronyms <- function(acronym) {
+  full_names <- c(
+    "Bipolar Disorder Type 1", "Schizoaffective Disorder", "Major Depressive Disorder",
+    "Bipolar Disorder Type 2", "Schizophrenia", "None", "Post-Traumatic Stress Disorder",
+    "Social Anxiety Disorder", "Dysthymia", "Obsessive-Compulsive Disorder", "Attention-Deficit/Hyperactivity Disorder",
+    "Generalized Anxiety Disorder", "Other Mood Disorder", "Substance Use Disorder", "Eating Disorder", "Other Anxiety Disorder"
+  )
+
+  return(full_names[match(acronym, c("BP1", "SZA", "MDD", "BP2", "SZ", "None", "PTSD", "SAD", "DYS", "OCD", "ADHD", "GAD", "OMD", "SUD", "ED", "OAD"))])
+}
+primary_dx <- map_acronyms(primary_dx)
+
+# pie(table(demos$Group))
+# pie(table(primary_dx[primary_dx!="No Dx"]))
+primary_dx <- as.factor(primary_dx)
+demos$Group <- as.factor(demos$Group)
+# library(ggplot2)
+#
+## Create a summary data frame with frequencies and labels
+# data <- data.frame(
+#  dx = levels(primary_dx[primary_dx != "No Dx"]),
+#  count = table(primary_dx[primary_dx != "No Dx"])
+# )
+# colors <- hcl.colors(18, "Warm", rev = FALSE)
+# print(colors)
+#
+# data <- data[data$dx!='No Dx',]
+# colnames(data)[1] <- "Diagnosis"
+# p <- ggplot(data, aes(x = 2, y = count.Freq, fill = Diagnosis)) +
+#  geom_bar(stat = "identity", width = 1) +
+#  coord_polar(theta = "y") +
+#  theme_void() +
+#  scale_x_continuous(limits = c(0, 3)) +
+#  #scale_fill_brewer(palette = "Set3") +
+#  scale_color_manual(values = colors) +
+#  theme(legend.title = element_text(size = 14),   # Adjust legend title size
+#        legend.text = element_text(size = 12),    # Adjust legend label size
+#        legend.key.size = unit(1, "lines"))
+# p
+## ggsave(filename = "output/behav_data_prep/figures/fig1PatientDxDonut.svg", plot = p, bg='transparent')
+#
+# data <- data.frame(
+#  Group = levels(demos$Group),
+#  count = table(demos$Group)
+# )
+# data$Group <- c("No Diagnosis", "Diagnosis")
+#
+## Create the donut chart with labels outside for small counts
+# p <- ggplot(data, aes(x = 2, y = count.Freq, fill = Group)) +
+#  geom_bar(stat = "identity", width = 1) +
+#  coord_polar(theta = "y", start = 3.5) +
+#  theme_void() +
+#  scale_x_continuous(limits = c(0, 3)) +
+#  scale_fill_brewer(palette = "Set1") +
+#  theme(legend.position = c(0.5,0.5),
+#        legend.title = element_text(size = 20),   # Adjust legend title size
+#        legend.text = element_text(size = 18),    # Adjust legend label size
+#        legend.key.size = unit(1.5, "lines"))    # Adjust legend box size
+# ggsave(filename = "output/behav_data_prep/figures/fig1GroupDonut.svg", plot = p, bg='transparent')
+# p
+
+# Create a summary data frame with frequencies and labels
+data <- data.frame(
+  dx = levels(primary_dx),
+  count = table(primary_dx)
+)
+
+# data <- data[data$dx!='No Dx',]
+colnames(data)[1] <- "Diagnosis"
+
+
+## Original 12 colors provided
+# original_colors <- c("#E58606", "#5D69B1", "#52BCA3", "#99C945", "#CC61B0",
+#                     "#24796C", "#DAA51B", "#2F8AC4", "#A5AA99", "#ED645A",
+#                     "#CC3A8E", "#764E9F")
+## Manually selected additional 8 colors
+## These are chosen to be distinct and to complement the existing colors
+# additional_colors <- c("#8dd3c7", "#ffffb3", "#bebada", "#fb8072", "#80b1d3",
+#                       "#fdb462", "#b3de69", "#fccde5")
+#
+## Combine the original and additional colors
+# full_palette <- c(original_colors, additional_colors)
+
+# Original 'Set3' palette with 12 colors
+set3_palette <- RColorBrewer::brewer.pal(12, "Set3")
+
+# Manually selected additional 8 colors
+# These are chosen to be distinct and to complement the existing 'Set3' colors
+
+additional_colors <- c(
+  "#fbb4ae", "#decbe4", "#ccebc5", "#b3cde3",
+  "#fed9a6", "#ffffcc", "#e5d8bd", "#fddaec"
+)
+
+# Combine the 'Set3' palette and additional colors
+full_palette <- c(set3_palette, additional_colors)
+
+full_palette[16] <- "#FAF9F6"
+
+# Combine the Diagnosis and count.Freq into a new factor
+data$Diagnosis_with_count <- factor(paste0(data$Diagnosis, " (", data$count.Freq, ")"))
+
+# Create the plot using the new factor
+p <- ggplot(data, aes(x = 1.9, y = count.Freq, fill = forcats::fct_reorder(Diagnosis_with_count, count.Freq))) +
+  geom_bar(stat = "identity", width = 1, colour = "black") +
+  coord_polar(theta = "y", start = 4) +
+  theme_void() +
+  scale_x_continuous(limits = c(0, 3)) +
+  scale_fill_manual(values = full_palette) +
+  theme(
+    legend.title = element_text(size = 14), # Adjust legend title size
+    legend.text = element_text(size = 12), # Adjust legend label size
+    legend.key.size = unit(1, "lines")
+  ) +
+  labs(fill = "Diagnosis (n)") +
+  guides(fill = guide_legend(reverse = TRUE)) # Reverse the order of the legend
+
+# Now, print or save the plot
+
+p
+
+
+ggsave(filename = "../output/behav_data_prep/figures/fig1AllDxDonut.svg", plot = p, bg = "transparent")
+```
+
+```{r plot demogs for figure 1 - Race}
+library(ggplot2)
+demos <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/demos.csv"), header = T, skip = 1, fileEncoding = "latin1")
+demos$racial <- factor(demos$racial,
+  levels = c(1:5, 999),
+  labels = c(
+    "American Indian/Alaskan Native",
+    "Asian",
+    "Native Hawaiian or Other Pacific Islander",
+    "Black or African American",
+    "White",
+    "Prefer not to answer/Left blank"
+  ),
+  exclude = NULL
+)
+
+
+demos$ethnic <- factor(demos$ethnic,
+  levels = c(1:2, 999),
+  labels = c(
+    "Not Hispanic or Latino",
+    "Hispanic or Latino",
+    "Prefer not to answer/Left blank"
+  ),
+  exclude = NULL
+)
+
+
+
+Group <- demos$Group
+Group[Group == "GenPop"] <- "No Diagnosis"
+Group[Group == "Patient"] <- "Diagnosis"
+Group <- as.factor(Group)
+# Sample data with five categories (replace with your actual data)
+data <- data.frame(prop.table(table(demos$racial, Group), 2))
+colnames(data)[1] <- "Race"
+
+# Create the stacked barplot with five categories and custom colors
+
+bygroup <- function(x, group, fun = sum, ...) {
+  splitted <- split(x, group)
+  funned <- lapply(splitted, fun, ...)
+  funned <- mapply(function(x, y) {
+    rep(x, length(y))
+  }, x = funned, y = splitted)
+  unsplit(funned, group)
+}
+
+position_stack_and_nudge <- function(x = 0, y = 0, vjust = 1, reverse = FALSE) {
+  ggproto(NULL, PositionStackAndNudge,
+    x = x,
+    y = y,
+    vjust = vjust,
+    reverse = reverse
+  )
+}
+
+#' @rdname ggplot2-ggproto
+#' @format NULL
+#' @usage NULL
+#' @noRd
+PositionStackAndNudge <- ggproto("PositionStackAndNudge", PositionStack,
+  x = 0,
+  y = 0,
+  setup_params = function(self, data) {
+    c(
+      list(x = self$x, y = self$y),
+      ggproto_parent(PositionStack, self)$setup_params(data)
+    )
+  },
+  compute_layer = function(self, data, params, panel) {
+    # operate on the stacked positions (updated in August 2020)
+    data <- ggproto_parent(PositionStack, self)$compute_layer(data, params, panel)
+
+    x_orig <- data$x
+    y_orig <- data$y
+    # transform only the dimensions for which non-zero nudging is requested
+    if (any(params$x != 0)) {
+      if (any(params$y != 0)) {
+        data <- transform_position(data, function(x) x + params$x, function(y) y + params$y)
+      } else {
+        data <- transform_position(data, function(x) x + params$x, NULL)
+      }
+    } else if (any(params$y != 0)) {
+      data <- transform_position(data, function(x) x, function(y) y + params$y)
+    }
+    data$nudge_x <- data$x
+    data$nudge_y <- data$y
+    data$x <- x_orig
+    data$y <- y_orig
+
+    data
+  },
+  compute_panel = function(self, data, params, scales) {
+    ggproto_parent(PositionStack, self)$compute_panel(data, params, scales)
+  }
+)
+
+
+p <- ggplot(data, aes(x = Group, y = Freq, fill = Race, label = Race)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Group", y = "") +
+  scale_fill_brewer(palette = "Spectral", direction = -1) +
+  theme_classic() +
+  geom_text(
+    aes(
+      label = ifelse(data$Freq > 0.02, percent(after_stat(y / bygroup(y, interaction(x, PANEL))), accuracy = 0.1), "")
+    ),
+    position = position_fill(0.5), size = 6
+  ) +
+  coord_flip() +
+  guides(x = "none") +
+  theme(
+    legend.title = element_text(size = 18), # Adjust legend title size
+    legend.text = element_text(size = 12), # Adjust legend label size
+    # legend.key.size = unit(1.5, "lines"),
+    axis.title.y = element_text(size = 25),
+    axis.text.y = element_text(size = 19)
+  )
+
+ggsave(
+  filename = "../output/behav_data_prep/figures/fig1RaceVar.svg", plot = p, bg = "transparent",
+  height = 3,
+  width = 15, units = "in"
+)
+
+# ETH
+
+# Sample data with five categories (replace with your actual data)
+data <- data.frame(prop.table(table(demos$ethnic, Group), 2))
+colnames(data)[1] <- "Ethnicity"
+
+p <- ggplot(data, aes(x = Group, y = Freq, fill = Ethnicity, label = Ethnicity)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Group", y = "") +
+  scale_fill_brewer(palette = "Pastel1", direction = -1) +
+  theme_classic() +
+  geom_text(
+    aes(
+      label = ifelse(data$Freq > 0.05, percent(after_stat(y / bygroup(y, interaction(x, PANEL))), accuracy = 0.1), "")
+    ),
+    position = position_fill(0.5), size = 6
+  ) +
+  coord_flip() +
+  guides(x = "none") +
+  theme(
+    legend.title = element_text(size = 18), # Adjust legend title size
+    legend.text = element_text(size = 12), # Adjust legend label size
+    # legend.key.size = unit(1.5, "lines"),
+    axis.title.y = element_text(size = 25),
+    axis.text.y = element_text(size = 19)
+  )
+
+# p1 <- p + geom_label_repel(aes(label = if_else(Group == "Diagnosis", Race, "")),
+#                     position = position_stack_and_nudge(vjust = 0.2, y = 0.1, x = -1),
+#                     force =1000,
+#                     force_pull   = 0,
+#                     segment.curvature = -0.2, segment.ncp = 1)
+
+ggsave(
+  filename = "../output/behav_data_prep/figures/fig1RaceVar.svg", plot = p, bg = "transparent",
+  height = 3,
+  width = 15, units = "in"
+)
+```
+
+```{r age historgram}
+library(ggplot2)
+
+demos <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/demos.csv"), header = T, skip = 1, fileEncoding = "latin1")
+demos[demos == 999] <- NA
+demos <- demos[-which(is.na(demos$Age)), ]
+
+demos_site1 <- demos[demos$Site == 1, ]
+demos_site2 <- demos[demos$Site == 2, ]
+# Create a ggplot object
+p1 <- ggplot(demos_site2, aes(x = Age, fill = factor(sex))) +
+  geom_histogram(width = 4, bins = 25) +
+  ylim(c(0, 22)) +
+  xlim(c(18, 70)) +
+  # xlim(0,20) +
+  # ylim(c(min(demos$Age),max(demos$Age))) +
+  theme_classic() +
+  scale_fill_manual(values = c("#F8B195", "#F67280", "#6C5B7B")) +
+  easy_remove_legend() +
+  easy_remove_axes("x", what = c("title", "text")) +
+  easy_remove_axes("y", what = c("title", "text"))
+
+p2 <- ggplot(demos_site1, aes(x = Age, fill = factor(sex))) +
+  geom_histogram(width = 4, bins = 25) +
+  ylim(c(0, 22)) +
+  xlim(c(18, 70)) +
+  # coord_flip() +
+  # scale_y_continuous(breaks = seq(from = 0, to = 20, by = 1), limits = c(0,20)) +
+  # scale_x_continuous(breaks = seq(from = 18, to = 70, by = 10), limits = c(18, 70)) +
+  # scale_y_reverse(limits = c(20,0)) +
+  scale_x_reverse(limits = c(70, 18)) +
+  theme_classic() +
+  scale_fill_manual(values = c("#F8B195", "#F67280")) +
+  scale_y_continuous(position = "right", limits = c(0, 22)) +
+  easy_remove_legend() +
+  easy_remove_axes("x", what = c("title", "text")) +
+  easy_remove_axes("y", what = c("title", "text"))
+
+
+ggsave(
+  filename = "../output/behav_data_prep/figures/fig1ageSexSite1.svg", plot = p2, bg = "transparent",
+  height = 2,
+  width = 4, units = "in"
+)
+ggsave(
+  filename = "../output/behav_data_prep/figures/fig1ageSexSite2.svg", plot = p1, bg = "transparent",
+  height = 2,
+  width = 4, units = "in"
+)
+```
+
+```{r map place of birth}
+library(ggplot2)
+library(dplyr)
+library(tidygeocoder)
+library(ggmap)
+library(rnaturalearth)
+library(sf)
+
+#  list of location names
+location_clean <- c(
+##REMOVED FOR CODE RELEASE##
+)
+
+
+# Clean location names
+cleaned_locations <- gsub(" [0-9]+", "", location_clean) # Remove any trailing numbers
+register_google("AIzaSyD0gmUUd36D90_0D55D7ZQ8aTUbrSlggCY")
+geocoded_data <- ggmap::geocode(cleaned_locations[!is.na(cleaned_locations)])
+# write
+
+
+## plot fill
+
+# Create a world map
+world_map <- map_data("world")
+
+# Plot the world map with location points
+ggplot() +
+  geom_polygon(data = world_map, aes(x = long, y = lat, group = group), fill = "white", color = "black") +
+  geom_point(data = geocoded_data, aes(x = lon, y = lat), color = "blue", size = 3) +
+  theme_minimal() + # Choose a nice theme
+  labs(title = "Geocoded Locations") + # Add a title
+  scale_color_manual(values = "red") + # Set point color to red
+  theme_void() # Remove axes and labels
+
+
+# coords to country
+library(sp)
+library(rworldmap)
+
+# The single argument to this function, points, is a data.frame in which:
+#   - column 1 contains the longitude in degrees
+#   - column 2 contains the latitude in degrees
+coords2country <- function(points) {
+  countriesSP <- getMap(resolution = "low")
+  # countriesSP <- getMap(resolution='high') #you could use high res map from rworldxtra if you were concerned about detail
+
+  # convert our list of points to a SpatialPoints object
+
+  # pointsSP = SpatialPoints(points, proj4string=CRS(" +proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs +towgs84=0,0,0"))
+
+  # setting CRS directly to that from rworldmap
+  pointsSP <- SpatialPoints(points, proj4string = CRS(proj4string(countriesSP)))
+
+
+  # use 'over' to get indices of the Polygons object containing each point
+  indices <- over(pointsSP, countriesSP)
+
+  # return the ADMIN names of each country
+  indices$ADMIN
+  # indices$ISO3 # returns the ISO3 code
+  # indices$continent   # returns the continent (6 continent model)
+  # indices$REGION   # returns the continent (7 continent model)
+}
+
+geocoded_data <- geocoded_data[complete.cases(geocoded_data), ]
+countries <- coords2country(geocoded_data)
+countries <- as.data.frame(table(countries))
+countries[countries$Freq == 0, ] <- c(NA, NA)
+countries <- countries[complete.cases(countries), ]
+colnames(countries) <- c("country", "value")
+world <- map_data("world")
+
+levels(countries$country)[levels(countries$country) == "United States of America"] <- "USA"
+library(viridis)
+
+library(tidyverse)
+library(ggthemes)
+
+world_map <- map_data("world") %>%
+  filter(!long > 180)
+world_map <- world_map[world_map$region != "Antarctica", ] #
+world_map %>%
+  merge(countries, by.x = "region", by.y = "country", all.x = T) %>%
+  arrange(group, order) %>%
+  ggplot(aes(x = long, y = lat, group = group, fill = value)) +
+  geom_polygon() +
+  geom_path(aes(x = long, y = lat, group = group),
+    color = "black", size = 0.5
+  ) +
+  coord_map("moll") +
+  expand_limits(x = world_map$long, y = world_map$lat) +
+  theme_map() +
+  scale_fill_gradientn(colours = viridis(3))
+
+
+# coords to US states
+# Function to determine U.S. states for given lon and lat
+get_us_states <- function(lon, lat) {
+  # Combine lon and lat into a data frame
+  input_data <- data.frame(lon = lon, lat = lat)
+
+  # Convert input data to sf object
+  input_sf <- st_as_sf(input_data, coords = c("lon", "lat"), crs = 4326)
+
+  # Load U.S. states shapefile
+  us_states <- ne_states(country = "united states of america", returnclass = "sf")
+
+  # Perform a spatial join
+  joined_data <- st_join(input_sf, us_states, join = st_within)
+
+  # Extract state names
+  # state_names <- ifelse(is.na(joined_data$admin), NA, joined_data$admin)
+  state_names <- joined_data$name
+  return(state_names)
+}
+
+states <- get_us_states(lon = geocoded_data$lon, lat = geocoded_data$lat)
+states <- as.data.frame(table(states))
+colnames(states) <- c("state", "value")
+usa_map <- subset(world_map, region == "USA")
+
+usa_data <- merge(states, usa_map, by.x = "state", by.y = "subregion", all.x = T)
+
+library(viridis)
+library(tidyverse)
+library(ggthemes)
+
+# arrange(usa_data, group, order) %>%
+ggplot(usa_data, aes(x = long, y = lat, group = group, fill = value)) +
+  geom_polygon() +
+  geom_path(aes(x = long, y = lat, group = group),
+    color = "black", size = 0.5
+  ) +
+  # coord_map("moll") +
+  theme_map() +
+  scale_fill_gradientn(colours = viridis(100))
+
+
+
+### plot dots
+
+library(tidyverse)
+library(ggthemes)
+
+world_map <- map_data("world") %>%
+  filter(!long > 180)
+world_map <- world_map[world_map$region != "Antarctica", ] #
+
+gg <- ggplot() +
+  geom_map(
+    data = world_map, map = world_map,
+    aes(x = long, y = lat, map_id = region),
+    color = "black", fill = "#00518E", size = 0.1, alpha = 1 / 4
+  ) +
+  geom_count(
+    data = geocoded_data,
+    aes(x = lon, y = lat)
+  ) +
+  coord_map("moll") +
+  expand_limits(x = world_map$long, y = world_map$lat) +
+  theme_map() #+ +
+# scale_size_area(max_size = 6)
+
+ggsave(filename = "../output/behav_data_prep/figures/fig1WorldMap.svg", plot = gg, bg = "transparent", scale = 3)
+
+# get density by US state
+
+library(jvamisc)
+library(stringr)
+#> Warning: package 'stringr' was built under R version 4.2.3
+
+# Example Data
+
+# Use function latlong2 from library(jvamisc) to convert lat and long points to state
+# geocoded_data <- apply(geocoded_data, 2, as.numeric)
+# state <- latlong2(geocoded_data, to = 'state')
+# Use function str_to_title form library(stringr) to make the first letter of each state uppercase
+# state <- str_to_title(state)
+
+# Convert state name to state abbreviation
+# state_abb <- state.abb[match(state, state.name)]
+
+# state.table <- table(state)
+# state_abb.table <- table(state_abb)
+
+
+library(ggplot2)
+library(maps)
+
+# Create a data frame for state boundaries
+state_boundaries <- map_data("state")
+
+
+# Filter world_map to include only the USA
+usa_map <- subset(world_map, region == "USA")
+
+gg <- ggplot() +
+  geom_map(
+    data = usa_map, map = usa_map,
+    aes(x = long, y = lat, map_id = region),
+    color = "black", fill = "#00518E", size = 0.1, alpha = 1 / 4
+  ) +
+  geom_polygon(
+    data = state_boundaries,
+    aes(x = long, y = lat, group = group),
+    color = "black", fill = NA, size = 0.1
+  ) +
+  geom_count(
+    data = geocoded_data,
+    aes(x = lon, y = lat)
+  ) +
+  coord_map("mercator", xlim = c(-130, -60), ylim = c(20, 50)) + # Adjust these coordinates
+  # expand_limits(x = usa_map$long, y = usa_map$lat) +
+  theme_map()
+
+gg
+ggsave(filename = "../output/behav_data_prep/figures/USAmap.svg", plot = gg, bg = "transparent", scale = 3)
+```
+
+```{r PCA on imputed data}
+# see PCA_on_clean_imputed_behavioural_data.Rmd
+```

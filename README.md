@@ -36,12 +36,14 @@ An important aim in psychiatry is the establishment of valid and reliable associ
 
 In doing so, we provide a comprehensive and analysis-ready transdiagnostic dataset which we hope  will contribute to the identification of illness-relevant biotypes, the establishment of brain-behavior associations, and progress in the development of personalized therapeutic interventions.
 
+To download raw BIDS formatted MRI data and raw behavioual data see: https://openneuro.org/datasets/ds005237
+
 <hr>
 <h1>About the repository:</h1>
 
 1. /HolmesLab/TransdiagnosticConnectomeProject/docs/: documents, e.g., TCP manuscript, supplemental information, etc.
 2. /HolmesLab/TransdiagnosticConnectomeProject/figures/: figures from the manuscript
-3. /HolmesLab/TransdiagnosticConnectomeProject/scripts/: post-minimal-processing scripts, e.g., parcellation, functional connectivity (FC) estimation, global signal regression (GSR), framewise displacement (FD), etc.
+3. /HolmesLab/TransdiagnosticConnectomeProject/scripts/: post-minimal-processing scripts, e.g., parcellation, functional connectivity (FC) estimation, global signal regression (GSR), framewise displacement (FD), QC-FC, behavioural data analyses etc.
 
 <hr>
 <h1>Supporting workflows and open source tools:</h1>

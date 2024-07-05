@@ -1,0 +1,525 @@
+---
+title: "Transform and then compute/plot PCA on imputed data"
+output: html_notebook
+---
+
+
+```{r load packages}
+library(here)
+library(ggplot2)
+library(ggeasy)
+library(reshape2)
+library(bestNormalize)
+library(parallel)
+library(fabricatr)
+library(tidyverse)
+library(scales)
+library(ggrepel)
+cl <- makeCluster(8)
+library(halfmoon)
+```
+
+# load in imputed matrix
+```{r}
+all_merge_clean_missForest_imputed <- readRDS("output/behav_data_prep/all_merge_clean_missForest_imputed.rds")
+```
+
+# Merge, transfrom and clean clin admin data
+```{r merge clin admin, eval=FALSE}
+clean_clin_admin <- c(
+  "cgi_tot", "cssrs_isi", "lrtot", "madrstot", "mcas_total_clean",
+  "panss_pos_clean", "panss_neg_clean", "panss_gen_clean", "pdss_tot", "ymrs_tot"
+)
+all_clin_admin <- all_merge_clean_missForest_imputed[, clean_clin_admin]
+
+# draw hist
+all_clin_admin_melt <- melt(all_clin_admin)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+```{r tranform clin admin, eval=FALSE}
+# Transform
+library(bestNormalize)
+all_clin_admin_trans <- data.frame(matrix(NA, nrow(all_clin_admin), ncol(all_clin_admin)))
+
+cl <- parallel::makeCluster(10)
+for (s in 2:ncol(all_clin_admin)) {
+  all_clin_admin_trans[, s] <- bestNormalize(all_clin_admin[, s], loo = T, cluster = cl)$chosen_transform$x.t
+}
+
+all_clin_admin_trans[, 1] <- all_clin_admin[, 1]
+colnames(all_clin_admin_trans) <- colnames(all_clin_admin)
+all_clin_admin_melt <- melt(all_clin_admin_trans)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+# binarize skewed vars
+bin_vec <- c(
+  "cgi_tot", "cssrs_isi", "lrtot", "madrstot", "panss_pos_clean",
+  "panss_neg_clean", "panss_gen_clean", "pdss_tot", "ymrs_tot"
+)
+
+all_clin_admin_trans[, bin_vec] <- apply(all_clin_admin[, bin_vec], 2, \(x) {
+  binarize(x, location_measure = min(x, na.rm = T))$x.t
+})
+all_clin_admin_melt <- melt(all_clin_admin_trans)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+
+# Merge, transfrom and clean self report data
+```{r self report 1, eval=FALSE}
+clean_self_report_1 <- c(
+  "atc_tot_score_clean", "bapq_rigid_subscale_ave", "bapq_aloof_ave",
+  "bapq_prag_lang_ave", "bis_f1", "bis_f2", "bis_f3", "bis_f4", "bis_f5",
+  "bis_f6", "bis_fi", "bis_fii", "bis_fiii", "bissc_total", "bas_drive",
+  "bas_fs", "bas_rr", "ctqcore_ea", "ctqcore_en", "ctqcore_pa",
+  "ctqcore_pn", "ctqcore_sa", "ctqcore_val"
+)
+
+all_self_report_1 <- all_merge_clean_missForest_imputed[, clean_self_report_1]
+
+all_clin_admin_melt <- melt(all_self_report_1)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+# Transform CTQ
+ctq_names <- c("ctqcore_ea", "ctqcore_en", "ctqcore_pa", "ctqcore_pn", "ctqcore_sa", "ctqcore_val")
+all_self_report_1_tras <- all_self_report_1
+all_self_report_1_tras[, ctq_names] <- apply(all_self_report_1_tras[, ctq_names], 2, \(x) {
+  bestNormalize(x, loo = T, cluster = cl)$chosen_transform$x.t
+})
+
+all_clin_admin_melt <- melt(all_self_report_1_tras)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+# transform did not go well, so binarise
+ctq_names <- c("ctqcore_ea", "ctqcore_en", "ctqcore_pa", "ctqcore_pn", "ctqcore_sa", "ctqcore_val")
+all_self_report_1_tras <- all_self_report_1
+all_self_report_1_tras[, ctq_names] <- apply(all_self_report_1_tras[, ctq_names], 2, \(x) {
+  binarize(x, location_measure = min(x, na.rm = T))$x.t
+})
+
+all_clin_admin_melt <- melt(all_self_report_1_tras)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+```{r self report 2, eval=FALSE}
+clean_self_report_2 <- c(
+  "rt_health_sum", "rt_recreational_sum", "rt_social_sum",
+  "rp_ethical_sum", "rp_financial_sum", "rp_health_sum",
+  "rp_recreational_sum", "rp_social_sum", "ftnd_score_total",
+  "mspss_fam", "mspss_fri", "mspss_so", "neo2_score_ag",
+  "neo2_score_co", "neo2_score_ex", "neo2_score_ne",
+  "neo2_score_op", "qvtot", "staiy_state"
+)
+
+
+all_self_report_2 <- all_merge_clean_missForest_imputed[, clean_self_report_2]
+
+
+all_clin_admin_melt <- melt(all_self_report_2)
+
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+# Transform skewed vars
+transform_names <- c("ftnd_score_total", "mspss_fam", "mspss_fri", "mspss_so")
+all_self_report_2_tras <- all_self_report_2
+all_self_report_2_tras[, transform_names] <- apply(all_self_report_2_tras[, transform_names], 2, \(x) {
+  bestNormalize(x, loo = T, cluster = cl)$chosen_transform$x.t
+})
+
+all_clin_admin_melt <- melt(all_self_report_2_tras)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+# transform did not go well, so binarise
+all_self_report_2_tras <- all_self_report_2
+transform_names <- c("mspss_fam", "mspss_fri", "mspss_so")
+all_self_report_2_tras[, transform_names] <- apply(all_self_report_2_tras[, transform_names], 2, \(x) {
+  binarize(x, location_measure = median(x, na.rm = T))$x.t
+})
+transform_names <- c("ftnd_score_total")
+all_self_report_2_tras[, transform_names] <- binarize(all_self_report_2_tras[, transform_names], location_measure = 0)$x.t
+
+all_clin_admin_melt <- melt(all_self_report_2_tras)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+
+```{r self report 3, eval=FALSE}
+clean_self_report_3 <- c(
+  "tci_ns_sum", "tci_ha_sum", "tci_rd_sum", "tci_p_sum", "tci_sd_sum",
+  "tci_c_sum", "tci_st_sum", "asi", "dass_depr_sc", "dass_anx_sc",
+  "dass_stress_sc", "poms_tscore_ten_anx", "poms_tscore_dep_dej",
+  "poms_tscore_vig_act", "poms_tscore_fat_in", "poms_tscore_con_bew",
+  "pss_totalscore", "vocabtscore", "teps_ant_score", "teps_cons_score"
+)
+
+
+all_self_report_3 <- all_merge_clean_missForest_imputed[, clean_self_report_3]
+
+all_clin_admin_melt <- melt(all_self_report_3)
+
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+# Transform skewed vars
+transform_names <- c("dass_depr_sc", "dass_anx_sc", "dass_stress_sc", "poms_tscore_ten_anx", "poms_tscore_dep_dej")
+all_self_report_3_tras <- all_self_report_3
+all_self_report_3_tras[, transform_names] <- apply(all_self_report_3_tras[, transform_names], 2, \(x) {
+  binarize(x, location_measure = median(x, na.rm = T))$x.t
+})
+
+all_clin_admin_melt <- melt(all_self_report_3_tras)
+
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+```{r self-report 4,  eval=FALSE}
+clean_self_report_4 <- c(
+  "cerq_sblame", "cerq_acceptance", "cerq_ruminate", "cerq_positive_refocus", "cerq_refocus_plan",
+  "cerq_positive_reappraisal", "cerq_perspective", "cerq_catastrophe", "cerq_other_blame", "cfq_forget_score",
+  "cfq_distract_score", "cfq_faltrig_score", "crt_3_corr_score", "ecrr_anxiety_score", "ecrr_avoidance_score",
+  "pum_tot_sum_score", "rrs_tot_sum_score", "rsri_soc_sch_score", "rsri_fear_ill_score", "shaps_total"
+)
+
+
+all_self_report_4 <- all_merge_clean_missForest_imputed[, clean_self_report_4]
+
+all_clin_admin_melt <- melt(all_self_report_4)
+
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+transform_names <- c("cerq_acceptance", "cerq_positive_refocus", "cerq_refocus_plan", "cerq_positive_reappraisal", "cerq_catastrophe", "cerq_other_blame", "crt_3_corr_score", "pum_tot_sum_score", "shaps_total")
+all_self_report_4_tras <- all_self_report_4
+all_self_report_4_tras[, transform_names] <- apply(all_self_report_4_tras[, transform_names], 2, \(x) {
+  binarize(x, location_measure = median(x, na.rm = T))$x.t
+})
+
+transform_names <- c("rrs_tot_sum_score")
+all_self_report_4_tras[, transform_names] <- bestNormalize(all_self_report_4_tras[, transform_names], loo = T, cluster = cl)$chosen_transform$x.t
+
+all_clin_admin_melt <- melt(all_self_report_4_tras)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+```{r TMBstroophammer, eval=FALSE}
+clean_all_cogs <- c(
+  "tmb_dsm_score", "tmb_choice_score", "tmb_fast_score", "tmb_gcpt_score", "tmb_mer_score",
+  "tmb_matrix_score", "tmb_word_score", "hammer_faces_medRT_corr", "hammer_shapes_medRT_corr"
+)
+
+all_cogs <- all_merge_clean_missForest_imputed[, clean_all_cogs]
+
+all_cogs_melt <- melt(all_cogs)
+ggplot(data = all_cogs_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+
+transform_names <- names(all_cogs)[-1]
+all_cogs_tras <- all_cogs
+all_cogs_tras[, transform_names] <- apply(all_cogs_tras[, transform_names], 2, \(x) {
+  bestNormalize(x, loo = T, cluster = cl)$chosen_transform$x.t
+})
+transform_names <- c("stroopincacc")
+# all_cogs_tras[,transform_names ] <- binarize(all_cogs[,transform_names ], location_measure = 46)$x.t
+
+
+ggplot(data = melt(all_cogs_tras), aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+
+```{r, merge all before exclusions }
+library(corrplot)
+library(dplyr)
+
+all_merge <- bind_cols(
+  all_clin_admin_trans,
+  all_self_report_1_tras,
+  all_self_report_2_tras,
+  all_self_report_3_tras,
+  all_self_report_4_tras,
+  all_cogs_tras
+)
+
+all_merge_corplot <- cor(scale(all_merge), use = "pairwise.complete.obs")
+diag(all_merge_corplot) <- 0
+corrplot(all_merge_corplot, tl.cex = 0.2, order = "hclust", method = "color", tl.srt = 45)
+
+pheatmap::pheatmap(all_merge_corplot, fontsize = 8)
+```
+
+# Compute and plot PCA
+```{r plot pca}
+library(rcartocolor)
+# find binary vars
+bin.vars <- apply(all_merge, 2, function(x) {
+  all(x %in% 0:1)
+})
+all_merge_scaled <- all_merge
+
+all_merge_scaled[, !bin.vars] <- apply(all_merge[, !bin.vars], 2, scale)
+pca <- prcomp(all_merge_scaled, center = F, scale. = F)
+
+explained_var <- pca$sdev^2 / sum(pca$sdev^2)
+
+
+df <- data.frame(component = 1:25, variance = explained_var[1:25])
+
+p1 <- ggplot(df, aes(x = component, y = variance)) +
+  geom_line(aes(group = 1)) +
+  geom_point(aes(size = variance, color = variance), alpha = 0.95) +
+  scale_color_carto_c(palette = "Teal", direction = -1) +
+  ggtitle("Scree Plot of Variance Explained") +
+  xlab("Principal Component") +
+  ylab("Proportion of Variance Explained") +
+  theme_classic() +
+  theme(legend.position = "none") # Remove legend
+
+ggsave(
+  filename = "./output/behav_data_prep/figures/PCA_scree.svg", plot = p1, bg = "transparent",
+  height = 5,
+  width = 5, units = "in"
+)
+
+
+# Take the variance for the first 5 PCs
+first_5 <- df$variance[1:4]
+
+# Sum the variance for the remaining PCs and label it as "other"
+other <- sum(df$variance[-(1:4)])
+
+# Combine into one vector
+pie_data <- c(first_5, other)
+
+# Create a data frame
+df_pie <- data.frame(
+  component = c(paste("PC", 1:4), "Rest"),
+  variance = pie_data
+)
+
+
+
+p1 <- ggplot(df_pie, aes(x = "", y = variance, fill = component)) +
+  geom_bar(stat = "identity", width = 1, colour = "black") +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = paste(round(variance * 100, 0), "%")),
+    position = position_stack(vjust = 0.5), size = 4
+  ) +
+  scale_fill_carto_d(palette = "Teal", direction = -1) +
+  ggtitle("Variance Explained") +
+  theme_void() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = "right"
+  ) +
+  easy_remove_legend_title() +
+  easy_all_text_size(size = 12)
+
+ggsave(
+  filename = "./output/behav_data_prep/figures/PCA_VarExp_pie.svg", plot = p1, bg = "transparent",
+  height = 5,
+  width = 5, units = "in"
+)
+```
+
+
+# Plot loadings
+```{r plot loadings}
+library(ggplot2)
+library(tidytext)
+library(tidyr)
+library(ggplot2)
+
+# Make sure your PCA object has row names
+clean_names <- readxl::read_excel("./data/behaviour/clean_names.xlsx")
+long_names <- clean_names$acro[clean_names$short %in% colnames(all_merge_scaled)]
+# write.csv(loadings_matrix, "output/behav_data_prep/pca_loading_matrix.csv")
+loadings_matrix <- pca$rotation
+rownames(loadings_matrix) <- long_names
+
+get_top_20_abs <- function(loadings, pc_index) {
+  loadings_vec <- loadings[, pc_index]
+  sorted_indices <- order(-abs(loadings_vec))[1:20] # Sorting in descending order
+  return(data.frame(
+    Loading = loadings_vec[sorted_indices],
+    Feature = rownames(loadings)[sorted_indices],
+    Polarity = ifelse(loadings_vec[sorted_indices] > 0, "Positive", "Negative"),
+    PC = paste0("PC", pc_index) # Add the PC information here
+  ))
+}
+
+loading_data <- data.frame()
+for (i in 1:4) {
+  # Append each PC's data to the loading_data dataframe
+  loading_data <- rbind(loading_data, get_top_20_abs(loadings_matrix, i))
+}
+
+# Now, loading_data should contain the top 20 loadings for all four PCs
+# Make sure Features are factored with their levels ordered by the absolute values
+# loading_data$Feature <- with(loading_data, reorder(Feature, abs(Loading)))
+loading_data %>%
+  group_by(PC) %>%
+  arrange(abs(Loading), .by_group = T) %>%
+  mutate(Feature = factor(interaction(PC, Feature, drop = TRUE)))
+
+loading_data <- loading_data %>%
+  mutate(PC = case_when(
+    PC == "PC1" ~ "PC1 (General)",
+    PC == "PC2" ~ "PC2 (Internalizing)",
+    PC == "PC3" ~ "PC3 (Externalizing)",
+    PC == "PC4" ~ "PC4 (Cognition)",
+    TRUE ~ PC # If none of the conditions are met, keep the original value
+  ))
+
+# loading_data$Feature <- stringr::str_split(as.character(loading_data$Feature),pattern = "\\.", simplify = T)[,2]
+
+clean_label <- function(label) {
+  label <- gsub("___PC1 (General)", "", label, fixed = TRUE)
+  label <- gsub("___PC2 (Internalizing)", "", label, fixed = TRUE)
+  label <- gsub("___PC3 (Externalizing)", "", label, fixed = TRUE)
+  label <- gsub("___PC4 (Cognition)", "", label, fixed = TRUE)
+  return(label)
+}
+
+p1 <- ggplot(loading_data, aes(x = reorder_within(Feature, abs(Loading), PC), y = abs(Loading), fill = Loading, alpha = abs(Loading))) +
+  geom_bar(stat = "identity", show.legend = F) + # Hide the legend for alpha
+  facet_wrap(~PC, scales = "free", ncol = 2) +
+  coord_flip() +
+  scale_fill_gradient2(low = "#2166AC", high = "#B2182B", mid = "white", midpoint = 0, limit = c(min(loading_data$Loading), max(loading_data$Loading)), space = "Lab", name = "Polarity") +
+  scale_alpha_continuous(range = c(0.3, 0.9)) + # Adjust range to set the level of transparency
+  labs(x = "", y = "Loading (absolute value)") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_x_discrete(labels = clean_label)
+
+p1
+
+ggsave(
+  filename = "./output/behav_data_prep/figures/PCA_loading_PC1-4_top20.svg", plot = p1, bg = "transparent",
+  height = 6,
+  width = 6, units = "in"
+)
+```
+
+# Group diff in PCA loadings (unused)
+```{r}
+## Examine group differences in PC1-4
+# read in demogs
+demos <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/demos.csv"), header = T, skip = 1, fileEncoding = "latin1")
+demos[demos == 999] <- NA
+
+# ppts included in clean imputed/transformed matrix
+include_ppts <- read.table("output/behav_data_prep/clean_selected_ids_n191.txt")
+demos <- demos[demos$subjectkey %in% include_ppts$x, ]
+
+# Patient-control
+demos_pca <- data.frame(demos, pca$x)
+
+
+library(tidyr)
+library(ggplot2)
+
+# Reshape the data selecting only PC1 to PC4
+long_demos_pca <- pivot_longer(demos_pca,
+  cols = c(PC1, PC2, PC3, PC4),
+  names_to = "Principal_Component",
+  values_to = "Value"
+)
+
+# Create the split violin plots with mean and error bars
+long_demos_pca$Group <- recode(long_demos_pca$Group,
+  "Patient" = "Diagnosis",
+  "GenPop" = "No Diagnosis"
+)
+
+p1 <- ggplot(long_demos_pca, aes(
+  x = as.factor(Site), y = Value,
+  fill = as.factor(Group),
+  group = interaction(Site, Group)
+)) +
+  geom_violin(
+    draw_quantiles = c(0.1, 0.5, 0.9),
+    trim = FALSE,
+    position = position_dodge(width = 0.9)
+  ) +
+  stat_summary(
+    fun = mean, geom = "point", shape = 23, size = 3,
+    position = position_dodge(width = 0.9),
+    color = "black", fill = "white"
+  ) +
+  facet_wrap(~Principal_Component, scales = "free_y") +
+  labs(fill = "Group", x = "Site", y = "Value") +
+  theme_classic() +
+  scale_fill_carto_d(palette = "Safe")
+
+ggsave(
+  filename = "./output/behav_data_prep/figures/PCA_site_difference.svg", plot = p1, bg = "transparent",
+  height = 4,
+  width = 6, units = "in"
+)
+
+p1 <- ggplot(long_demos_pca, aes(
+  x = as.factor(sex), y = Value,
+  fill = as.factor(Group),
+  group = interaction(sex, Group)
+)) +
+  geom_violin(
+    draw_quantiles = c(0.1, 0.5, 0.9),
+    trim = FALSE,
+    position = position_dodge(width = 0.9)
+  ) +
+  stat_summary(
+    fun = mean, geom = "point", shape = 23, size = 3,
+    position = position_dodge(width = 0.9),
+    color = "black", fill = "white"
+  ) +
+  facet_wrap(~Principal_Component, scales = "free_y") +
+  labs(fill = "Group", x = "sex", y = "Value") +
+  theme_classic() +
+  scale_fill_carto_d(palette = "Safe")
+
+ggsave(
+  filename = "./output/behav_data_prep/figures/PCA_sex_difference.svg", plot = p1, bg = "transparent",
+  height = 4,
+  width = 6, units = "in"
+)
+```
+
+# Age correlations w/ PCA loadings (unused)
+```{r age correlations pca}
+p1 <- ggplot(long_demos_pca, aes(x = Age, y = Value, fill = as.factor(sex))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_wrap(~Principal_Component, scales = "free_y") +
+  labs(fill = "Group", x = "Site", y = "Value") +
+  theme_classic() +
+  scale_fill_carto_d(palette = "Safe")
+p1
+```

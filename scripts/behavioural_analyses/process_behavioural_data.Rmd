@@ -1,0 +1,882 @@
+---
+title: "Clean and impute behavioural scales for TCP data release"
+output: html_notebook
+---
+
+```{r load packages}
+library(here)
+library(ggplot2)
+library(reshape2)
+library(bestNormalize)
+library(parallel)
+library(fabricatr)
+library(tidyverse)
+library(scales)
+library(ggrepel)
+library(halfmoon)
+cl <- makeCluster(8)
+```
+
+# Clin admin 
+## Anxiety Symptom Chronicity 
+```{r clinician administered (clin admin) asc}
+asc_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data//clin_admin/asc01.csv"), header = T, skip = 1)
+asc_raw[is.na(asc_raw)] <- 0
+asc_raw[asc_raw$anxiety_symptom_chronicity_complete != 2, -1] <- NA
+asc_raw[asc_raw == 999] <- NA
+asc_raw$asc_1_a81f80[asc_raw$asc_1_a81f80 > 1000] <- NA
+asc_raw <- asc_raw[, c("subjectkey", "asc_1_a81f80", "asc_2_1d1e34")]
+# asc_1_a81f80	Anxiety Symptom Chronicity - At what age did you first have problems with anxiety that caused you significant distress or interfered with your day to day functioning?
+# asc_2_1d1e34	Anxiety Symptom Chronicity - What proportion of the time (since onset) have you had problems with anxiety that caused you significant distress or interfered with your day to day functioning?
+asc_tot <- asc_raw$asc_1_a81f80 * asc_raw$asc_2_1d1e34
+asc_tot <- data.frame("subjectkey" = asc_raw$subjectkey, asc_tot)
+```
+
+## Clincial Global Impressio Scalse
+```{r clinician administered (clin admin) cgi}
+cgi_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_admin/cgi01.csv"), header = T, skip = 1)
+cgi_raw[cgi_raw == 999] <- NA
+cgi_raw <- cgi_raw[, c("subjectkey", "cgi_si", "cgi_sii")]
+cgi_tot <- data.frame("subjectkey" = cgi_raw$subjectkey, "cgi_tot" = (cgi_raw$cgi_si + cgi_raw$cgi_sii) / 2)
+# Clinical Global Impression - Severity of Illness (Considering your total clinical experience with this particular population, how mentally ill is the patient at this time?)
+# Clinical Global Impression - Global Improvement (Compared to his condition at admission to the project, how much has he changed?)
+```
+
+## Columbia Suicide Severity Rating Scale Completion
+```{r clinician administered (clin admin) cssrs}
+cssrs_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_admin/cssrs01.csv"), header = T, skip = 1)
+cssrs_raw[cssrs_raw == 999] <- NA
+cssrs_raw$cssrs_isi <- rowSums(cbind(cssrs_raw$sidfrql, cssrs_raw$siddurl, cssrs_raw$sidctrl, cssrs_raw$siddtrl, cssrs_raw$sidrsnl), na.rm = T)
+cssrs_raw$cssrs_sbs <- ifelse(rowSums(cbind(cssrs_raw$sb2l, cssrs_raw$sbnssibl, cssrs_raw$sb3l, cssrs_raw$sb4l, cssrs_raw$sb5l), na.rm = T) > 0, 1, 0)
+cssrs_raw <- cssrs_raw[, c("subjectkey", "idintsvl", "cssrs_isi", "cssrs_sbs", "actlthl1")]
+cssrs_tot <- cssrs_raw[, c("subjectkey", "cssrs_isi")]
+# idintsvl	mostsevere_num	The following features should be rated with respect to the most severe type of ideation (i.e., 1-5 from above, with 1 being the least severe and 5 being the most severe). Ask about time he/she was feeling the most suicidal.
+# Intensity of Ideation Subscale = sum of sidfrql siddurl sidctrl siddtrl sidrsnl
+# Suicidal Behavior Subscale:
+# actlthl1	recent_actual_lethal	Recent Attempt Actual Lethality/Medical Damage
+```
+
+
+## range_of_impaired_functioning_tool_liferift
+```{r clinician administered (clin admin) lrift}
+lrift_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_admin/lrift01.csv"), header = T, skip = 1)
+lrift_raw[lrift_raw == 999] <- NA
+lrift_tot <- lrift_raw[, c("subjectkey", "lrtot")]
+lrift_raw <- lrift_raw[, c("subjectkey", "lrwork", "lrinter", "lrsat", "lrrec")]
+# lrwork	liferift_1_e4ddfa	Range of Impaired Functioning Tool - Work (Maximum of 1a, 1b, and 1c)
+# lrinter	liferift_2_05589c	Range of Impaired Functioning Tool - Interpersonal relations (maximum of 2a, 2b, 2c and 2d)
+# lrsat	liferift_3_b2c975	Range of Impaired Functioning Tool - Satisfaction
+# lrrec	liferift_4_819c90	Range of Impaired Functioning Tool - Recreation
+```
+
+## Montgomery-Asberg Depression Rating Scale Completion MADRAS
+```{r clinician administered (clin admin) MADRAS}
+madras_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_admin/madrs01.csv"), header = T, skip = 1)
+madras_raw[madras_raw == 999] <- NA
+madras_tot <- madras_raw[, c("subjectkey", "madrstot")]
+madras_raw <- madras_raw[, c("subjectkey", "madrsaps", "madrssad", "madrsten", "madrsslp", "madrsapp", "madrscon", "madrslas", "madrsfee", "madrspes", "madrssui")]
+```
+
+## Multnomah Community Ability Scale (MCAS)
+```{r clinician administered (clin admin) MCas}
+mcas_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_admin/mcas01.csv"), header = T, skip = 1)
+mcas_raw[mcas_raw == 999] <- NA
+mcas_raw[mcas_raw == 1000] <- 6
+mcas_raw$mcas_total_clean <- rowSums(mcas_raw[, 6:22])
+mcas_tot <- mcas_raw[, c("subjectkey", "mcas_total_clean")]
+mcas_raw <- mcas_raw[, c("subjectkey", "mcas_total_clean")]
+```
+
+
+## Positive and Negative Syndrome Scale - General Psychopathology Scale Total PANSS
+```{r clinician administered (clin admin) PANSS}
+panss_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_admin/panss01.csv"), header = T, skip = 1)
+panss_raw[panss_raw == 999] <- NA
+panss_raw[panss_raw == 1000] <- 1
+panss_raw$panss_pos_clean <- rowSums(panss_raw[, 6:12])
+panss_raw$panss_neg_clean <- rowSums(panss_raw[, 14:20])
+panss_raw$panss_gen_clean <- rowSums(panss_raw[, 22:37])
+panss_raw$panss_marder_AnxDep <- rowSums(panss_raw[, c(23, 24, 25, 27)])
+panss_raw$panss_marder_UHE <- rowSums(panss_raw[, c(9, 12, 29, 35)])
+panss_raw$panss_marder_CogDis <- rowSums(panss_raw[, c(7, 18, 26, 31, 32, 34, 35)])
+panss_raw$panss_marder_Pos <- rowSums(panss_raw[, c(6, 8, 10, 11, 20, 22, 30, 33)])
+panss_raw$panss_marder_Neg <- rowSums(panss_raw[, c(14, 15, 16, 17, 19, 28, 37)])
+
+panss_raw$panss_total_clean <- rowSums(panss_raw[, c("panss_pos_clean", "panss_neg_clean", "panss_gen_clean")])
+
+panss_tot <- panss_raw[, c("subjectkey", "panss_total_clean")]
+panss_raw <- panss_raw[, c(
+  "subjectkey", "panss_pos_clean", "panss_neg_clean", "panss_gen_clean", "panss_marder_AnxDep",
+  "panss_marder_UHE", "panss_marder_CogDis", "panss_marder_Pos", "panss_marder_Neg"
+)]
+```
+
+## Panic Disorder Severity Scale PDSS 
+```{r clinician administered (clin admin) PDSS}
+pdss_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_admin/pdss01.csv"), header = T, skip = 1)
+pdss_raw[pdss_raw == 999] <- NA
+pdss_raw$panicdis[is.na(pdss_raw$panicdis)] <- 0
+pdss_raw$pdss_tot <- pdss_raw$panicfrq * pdss_raw$panicdis
+pdss_raw <- pdss_raw[, c("subjectkey", "pdss_tot")]
+pdss_tot <- pdss_raw[, c("subjectkey", "pdss_tot")]
+```
+
+
+## Young Mania Rating Scale YMRS
+```{r clinician administered (clin admin) YMRR}
+ymrs_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_admin/ymrs01.csv"), header = T, skip = 1)
+ymrs_raw[ymrs_raw == 999] <- NA
+ymrs_raw[ymrs_raw == 1000] <- 0
+ymrs_raw$ymrs_tot <- rowSums(ymrs_raw[, 6:16])
+ymrs_raw <- ymrs_raw[, c("subjectkey", "ymrs_tot")]
+ymrs_tot <- ymrs_raw[, c("subjectkey", "ymrs_tot")]
+```
+
+
+
+# Self admin 
+## for missing responces, for any scales with sum scores, data with >0 missing were excluded. Tolerance was added for average scores
+## Alcohol, tobacco caffine ATC
+```{r self administered (clin self) ATC}
+atc_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_self/atc01.csv"), header = T, skip = 1)
+atc_raw[atc_raw == 999] <- NA
+atc_raw$atc_tot_score_clean <- rowSums(atc_raw[, 10:16], na.rm = T) # non-response assumed NA/NO
+atc_raw$atc_tot_score_clean[atc_raw$atc_tot_score_clean == 0] <- NA
+atc_total <- atc_raw[, c("subjectkey", "atc_tot_score_clean")]
+atc_raw <- atc_raw[, c("subjectkey", "atc_1", "atc_2", "atc_3", "atc_4", "atc_5", "atc_6", "atc_7")]
+
+# atc_1	How often do you have a drink containing alcohol?
+# atc_2	How many drinks on average do you have per occasion?
+# atc_3	Have you had more than 4 drinks on any occasion in the last three months?
+# atc_4	How much do you smoke on average per day?
+# atc_5	When was the last time you smoked?
+# atc_6	How much Caffeine (caffeinated soda, coffee, caffeinated tea) on average do you consume per day?
+# atc_7	When was the last time you had caffeine?
+```
+
+## Broad Autism Phenotype Questionnaire 
+```{r self administered (clin self) BAPQ}
+bapq_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_self/bapq01.csv"), header = T, skip = 1)
+bapq_raw[bapq_raw == 999] <- NA
+bapq_raw[bapq_raw$qc_bapq_tot_num_nonresp > 1, -1] <- NA
+bapq_total <- bapq_raw[, c("subjectkey", "bapq_total_ave")]
+bapq_raw <- bapq_raw[, c("subjectkey", "bapq_rigid_subscale_ave", "bapq_aloof_ave", "bapq_prag_lang_ave")]
+```
+
+
+## Barratt Impulsiveness Scale (BIS) 
+```{r self administered (clin self) BIS}
+bis_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_self/bis01.csv"), header = T, skip = 1)
+bis_raw[bis_raw == 999] <- NA
+bis_raw[bis_raw$qc_barratt_tot_num_nonresp > 0, -1] <- NA
+bis_total <- bis_raw[, c("subjectkey", "bis_total")]
+bis_raw <- bis_raw[, c("subjectkey", "bis_f1", "bis_f2", "bis_f3", "bis_f4", "bis_f5", "bis_f6", "bis_fi", "bis_fii", "bis_fiii")]
+
+# bis_total	barratt_tot_sum_score	Barratt Impulsiveness Scale (BIS) total sum score
+# bis_f1	barratt_1_atten_score	BIS 1st order factor Attention subscale score
+# bis_f2	barratt_1_motor_score	BIS 1st order factor Motor subscale score
+# bis_f3	barratt_1_self_cont_score	BIS 1st order factor Self-control subscale score
+# bis_f4	barratt_1_cog_comp_score	BIS 1st order factor Cognitive Complexity subscale score
+# bis_f5	barratt_1_persev_score	BIS 1st order factor Perseverance subscale score
+# bis_f6	barratt_1_cog_inst_score	BIS 1st order factor Cognitive Instability subscale score
+# bis_fi	barratt_2_atten_impulse_score	BIS 2nd order factor Attentional Impulsiveness subscale score
+# bis_fii	barratt_2_motor_impulse_score	BIS 2nd order factor Motor Impulsiveness subscale score
+# bis_fiii	barratt_2_nonplan_impulse_score	BIS 2nd order factor Nonplanning Impulsiveness subscale score
+```
+
+## BIS/BAS
+```{r self administered (clin self) BIS/BAS}
+bisbas_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_self/bisbas01.csv"), header = T, skip = 1)
+bisbas_raw[bisbas_raw == 999] <- NA
+bisbas_raw[bisbas_raw$qc_bisbas_tot_num_nonresp > 2, -1] <- NA
+bisbas_raw$bas_total <- rowMeans(cbind(bisbas_raw$bas_drive, bisbas_raw$bas_fs, bisbas_raw$bas_rr))
+bisbas_total <- bisbas_raw[, c("subjectkey", "bas_total", "bissc_total")]
+bisbas_raw <- bisbas_raw[, c("subjectkey", "bissc_total", "bas_drive", "bas_fs", "bas_rr")]
+
+# BAS Drive:  3, 9, 12, 21
+# BAS Fun Seeking:  5, 10, 15, 20
+# BAS Reward Responsiveness:  4, 7, 14, 18, 23
+# BIS:  2, 8, 13, 16, 19, 22, 24
+# Items 1, 6, 11, 17,  are fillers.
+# The fact that there are three BAS-related scales and only one BIS-related scales was not planned or theoretically motivated. The factors emerged #empirically, from an item set that was intended to capture diverse manifestations of the BAS, according to various theoretical statements. It is #likely that a broader sampling of items on the BIS side would also have resulted in more than one scale. I do not encourage combining the BAS #scales, however, because they do turn out to focus on different aspects of incentive sensitivity. In particular, Fun Seeking is known to have #elements of impulsiveness that are not contained in the other scales.
+```
+
+## Childhood Trauma Questionaire CTQ
+
+```{r self administered (clin self) CTQ}
+ctq_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_self/ctq01.csv"), header = T, skip = 1)
+ctq_raw[ctq_raw == 999] <- NA
+ctq_raw[ctq_raw$qc_ctq_tot_num_nonresp > 1, -1] <- NA
+ctq_raw$ctqcore_val <- ifelse(is.na(ctq_raw$ctqcore_ea), NA, ctq_raw$ctqcore_val)
+ctq_total <- ctq_raw[, c("subjectkey", "ctqcore_ea", "ctqcore_en", "ctqcore_pa", "ctqcore_pn", "ctqcore_sa", "ctqcore_val")]
+ctq_raw <- ctq_raw[, c("subjectkey", "ctqcore_ea", "ctqcore_en", "ctqcore_pa", "ctqcore_pn", "ctqcore_sa", "ctqcore_val")]
+
+# ctqcore_ea	ctq_emo_abuse_score	CTQ Emotional Abuse Subscale score
+# ctqcore_en	ctq_emo_neglect_score	CTQ Emotional Neglect Subscale score
+# ctqcore_pa	ctq_phys_abuse_score	CTQ Physical Abuse Subscale score
+# ctqcore_pn	ctq_phys_neglect_score	CTQ Physical Neglect Subscale score
+# ctqcore_sa	ctq_sex_abuse_score	CTQ Sexual Abuse Subscale score
+# ctqcore_val	ctq_minimize_denial_validity	CTQ Minimization/Denial Validity score
+```
+
+## Domain-Specific Risk-Taking (DOSPERT) 
+```{r}
+dospert_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_self/dospert01.csv"), header = T, skip = 1)
+dospert_raw[dospert_raw == 999] <- NA
+dospert_raw[dospert_raw$qc_dospert_tot_num_nonresp > 0, -1] <- NA
+dospert_total <- dospert_raw[, c("subjectkey", "dospert_risktake_score", "dospert_riskperc_score")]
+dospert_raw <- dospert_raw[, c("subjectkey", "rt_ethical_sum", "rt_financial_sum", "rt_health_sum", "rt_recreational_sum", "rt_social_sum", "rp_ethical_sum", "rp_financial_sum", "rp_health_sum", "rp_recreational_sum", "rp_social_sum")]
+```
+
+
+## Fagerstrom Test for Nicotine Dependence (FTND)
+```{r}
+ftnd_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_self/fagerstrom01.csv"), header = T, skip = 1)
+ftnd_raw[ftnd_raw == 999] <- NA
+ftnd_total <- ftnd_raw[, c("subjectkey", "ftnd_score_total")]
+ftnd_raw <- ftnd_raw[, c("subjectkey", "ftnd_score_total")]
+```
+
+
+## Multidimensional Scale of Perceived Social Support (MSPSS) 
+```{r}
+MSPSS_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_self/mspss01.csv"), header = T, skip = 1)
+MSPSS_raw <- MSPSS_raw[-232:-233, ]
+MSPSS_raw[MSPSS_raw == 999] <- NA
+MSPSS_raw[MSPSS_raw$qc_mspss_tot_num_nonresp > 1, -1] <- NA
+MSPSS_total <- MSPSS_raw[, c("subjectkey", "mspss_total")]
+MSPSS_raw <- MSPSS_raw[, c("subjectkey", "mspss_fam", "mspss_fri", "mspss_so")]
+```
+
+
+## NEO-FFI
+```{r}
+neoffi_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_self/nffi01.csv"), header = T, skip = 1)
+neoffi_raw[neoffi_raw == 999] <- NA
+neoffi_raw[neoffi_raw$qc_neoffi_tot_num_nonresp > 1, -1] <- NA
+neoffi_raw <- neoffi_raw[, c("subjectkey", "neo2_score_ag", "neo2_score_co", "neo2_score_ex", "neo2_score_ne", "neo2_score_op")]
+neoffi_raw[neoffi_raw == 0] <- NA
+neoffi_total <- neoffi_raw[, c("subjectkey", "neo2_score_ag", "neo2_score_co", "neo2_score_ex", "neo2_score_ne", "neo2_score_op")]
+```
+
+## Quick Inventory of Depressive Symptamology (QIDS) 
+```{r}
+qids_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_self/qids01.csv"), header = T, skip = 1)
+qids_raw[qids_raw == 999] <- NA
+qids_raw[qids_raw$qc_qids_tot_num_nonresp > 0, -1] <- NA
+qids_total <- qids_raw[, c("subjectkey", "qvtot")]
+qids_raw <- qids_raw[, c("subjectkey", "vsoin", "vmnin", "vemin", "vhysm", "vmdsd", "vapdc", "vapin", "vwtdc", "vwtin", "vcntr", "vvwsf", "vsuic", "vintr", "vengy", "vslow", "vagit")]
+```
+
+
+## The State-Trait Anxiety Inventory (STAI)
+```{r}
+stai_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_self/stai01.csv"), header = T, skip = 1)
+stai_raw[stai_raw == 999] <- NA
+stai_raw[stai_raw$qc_stai_tot_num_nonresp < 0, -1] <- NA
+stai_raw <- stai_raw[, c("subjectkey", "staiy_state", "staiy_state")]
+stai_total <- stai_raw[, c("subjectkey", "staiy_state", "staiy_state")]
+```
+
+## Temperament and Character Inventory (TCI)
+```{r}
+tci_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/clin_self/tci01.csv"), header = T, skip = 1)
+tci_raw[tci_raw == 999] <- NA
+tci_raw[tci_raw$qc_tci_tot_num_nonresp > 0, -1] <- NA
+tci_total <- tci_raw[, c("subjectkey", "tci_total")]
+tci_raw <- tci_raw[, c("subjectkey", "tci_ns_sum", "tci_ha_sum", "tci_rd_sum", "tci_p_sum", "tci_sd_sum", "tci_c_sum", "tci_st_sum")]
+```
+
+
+# MRI session self admin
+## Anxiety Sensitivity Index (ASI) 
+```{r}
+anxsi_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/mri_self/anxsi01.csv"), header = T, skip = 1)
+anxsi_raw[anxsi_raw == 999] <- NA
+anxsi_raw[anxsi_raw$qc_asi_tot_num_nonresp > 0, -1] <- NA
+anxsi_total <- anxsi_raw[, c("subjectkey", "asi")]
+anxsi_raw <- anxsi_raw[, c("subjectkey", "asi")]
+```
+
+## DASS Depression  Score 
+```{r}
+dass_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/mri_self/dass01.csv"), header = T, skip = 1)
+dass_raw[dass_raw == 999] <- NA
+dass_raw[dass_raw$qc_dass_tot_num_nonresp > 0, -1] <- NA
+dass_total <- dass_raw[, c("subjectkey", "dass_depr_sc", "dass_anx_sc", "dass_stress_sc")]
+dass_raw <- dass_raw[, c("subjectkey", "dass_depr_sc", "dass_anx_sc", "dass_stress_sc")]
+```
+
+## Profile of Mood States (POMS) 
+```{r}
+poms_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/mri_self/poms01.csv"), header = T, skip = 1)
+poms_raw[poms_raw == 999] <- NA
+poms_raw[poms_raw$qc_poms_tot_num_nonresp > 0, -1] <- NA
+colnames(poms_raw)[1:2] <- colnames(poms_raw)[2:1]
+poms_total <- poms_raw[, c("subjectkey", "poms_tot_raw_score")]
+poms_raw <- poms_raw[, c("subjectkey", "poms_tscore_ten_anx", "poms_tscore_dep_dej", "poms_tscore_vig_act", "poms_tscore_fat_in", "poms_tscore_con_bew")]
+```
+
+## Perceived Stress Scale (PSS)
+```{r}
+pss_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/mri_self/pss01.csv"), header = T, skip = 1)
+pss_raw[pss_raw == 999] <- NA
+pss_raw[pss_raw$qc_pss_tot_num_nonresp > 0, -1] <- NA
+pss_total <- pss_raw[, c("subjectkey", "pss_totalscore")]
+pss_raw <- pss_raw[, c("subjectkey", "pss_totalscore")]
+```
+
+## Shipley IQ (sils) 
+```{r}
+sils_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/mri_self/sils01.csv"), header = T, skip = 1)
+sils_raw[sils_raw == 999] <- NA
+sils_raw[sils_raw$qc_shipley_tot_num_nonresp > 0, -1] <- NA
+sils_total <- sils_raw[, c("subjectkey", "vocabtscore")]
+sils_raw <- sils_raw[, c("subjectkey", "vocabtscore")]
+```
+
+## The Temporal Experience of Pleasure Scale (TEPS)
+```{r}
+teps_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/mri_self/teps01.csv"), header = T, skip = 1)
+teps_raw[teps_raw == 999] <- NA
+colnames(teps_raw)[1:2] <- colnames(teps_raw)[2:1]
+teps_raw[teps_raw$qc_teps_ant_num_nonresp > 0 | teps_raw$qc_teps_cons_num_nonresp > 0, -1] <- NA
+teps_total <- teps_raw[, c("subjectkey", "teps_ant_score", "teps_cons_score")]
+teps_raw <- teps_raw[, c("subjectkey", "teps_ant_score", "teps_cons_score")]
+```
+
+# Supplemental self-report
+## Cognitive Emotion Regulation Questionnaire (CERQ)
+```{r}
+cerq_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/supp_self/cerq01.csv"), header = T, skip = 1)
+cerq_raw[cerq_raw == 999] <- NA
+cerq_raw[cerq_raw$qc_cerq_tot_num_nonresp > 0, -1] <- NA
+cerq_total <- cerq_raw[, c("subjectkey", "sblame", "acceptance", "ruminate", "positive_refocus", "refocus_plan", "positive_reappraisal", "perspective", "catastrophe", "other_blame")]
+cerq_raw <- cerq_raw[, c("subjectkey", "sblame", "acceptance", "ruminate", "positive_refocus", "refocus_plan", "positive_reappraisal", "perspective", "catastrophe", "other_blame")]
+colnames(cerq_total)[-1] <- colnames(cerq_raw)[-1] <- paste0("cerq_", colnames(cerq_raw)[-1])
+```
+
+## Cognitive Failures Questionnaire (CFQ) 
+```{r}
+cfq_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/supp_self/cogfq01.csv"), header = T, skip = 1)
+cfq_raw[cfq_raw == 999] <- NA
+cfq_raw[cfq_raw$qc_cfq_tot_num_nonresp > 0, -1] <- NA
+cfq_total <- cfq_raw[, c("subjectkey", "cogfq_total")]
+cfq_raw <- cfq_raw[, c("subjectkey", "cfq_forget_score", "cfq_distract_score", "cfq_faltrig_score")]
+```
+
+## Cognitive Reflections Task (CRT)
+```{r}
+crt_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/supp_self/crt01.csv"), header = T, skip = 1)
+crt_raw[crt_raw == 999] <- NA
+crt_raw[crt_raw$qc_crt_3_num_nonresp > 0 | crt_raw$qc_crt_5_num_nonresp > 0, -1] <- NA
+crt_total <- crt_raw[, c("subjectkey", "crt_3_corr_score")] # corr .95 with 5 question version
+crt_raw <- crt_raw[, c("subjectkey", "crt_3_corr_score")]
+```
+
+
+## Experience in Close Relationship Scale (ECR)
+```{r}
+ecr_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/supp_self/ecr01.csv"), header = T, skip = 1)
+ecr_raw[ecr_raw == 999] <- NA
+ecr_raw[ecr_raw$qc_ecr_tot_num_nonresp > 2, -1] <- NA
+ecr_total <- ecr_raw[, c("subjectkey", "ecrr_anxiety_score", "ecrr_avoidance_score")]
+ecr_raw <- ecr_raw[, c("subjectkey", "ecrr_anxiety_score", "ecrr_avoidance_score")]
+```
+
+## Positive Urgency Measure (PUM)
+```{r}
+pum_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/supp_self/pum01.csv"), header = T, skip = 1)
+pum_raw[pum_raw == 999] <- NA
+pum_raw[pum_raw$qc_pum_tot_num_nonresp > 0, -1] <- NA
+pum_total <- pum_raw[, c("subjectkey", "pum_tot_sum_score")]
+pum_raw <- pum_raw[, c("subjectkey", "pum_tot_sum_score")]
+```
+
+## Ruminative Responses Scale (RRS) 
+```{r}
+rrs_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/supp_self/rrs01.csv"), header = T, skip = 1)
+rrs_raw[rrs_raw == 999] <- NA
+rrs_raw[rrs_raw$qc_rrs_tot_num_nonresp > 0, -1] <- NA
+rrs_total <- rrs_raw[, c("subjectkey", "rrs_tot_sum_score")]
+rrs_raw <- rrs_raw[, c("subjectkey", "rrs_tot_sum_score")]
+```
+
+## Retrospective Self-Report of Inhibition (RSRI) 
+```{r}
+rsri_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/supp_self/rsri01.csv"), header = T, skip = 1)
+rsri_raw[rsri_raw == 999] <- NA
+rsri_raw[rsri_raw$qc_rsri_tot_num_nonresp > 0, -1] <- NA
+rsri_total <- rsri_raw[, c("subjectkey", "rsri_tot_avg_score")]
+rsri_raw <- rsri_raw[, c("subjectkey", "rsri_soc_sch_score", "rsri_fear_ill_score")]
+```
+
+## Snaith-Hamilton Pleasure Scale (SHAPS) 
+```{r}
+shaps_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/supp_self/shaps01.csv"), header = T, skip = 1)
+shaps_raw[shaps_raw == 999] <- NA
+shaps_raw[shaps_raw$qc_shaps_tot_num_nonresp > 0, -1] <- NA
+shaps_total <- shaps_raw[, c("subjectkey", "shaps_total")]
+shaps_raw <- shaps_raw[, c("subjectkey", "shaps_total")]
+
+# Either of the Disagree responses receives a score of 1 and either of the
+# Agree responses receives a score of 0. The SHAPS is scored as the sum of the 14
+# items so that total scores ranged from 0 to 14. A higher total SHAPS score
+# indicated higher levels of anhedonia. A cut-off score of 2 provides the best
+# discrimination between “normal” and “abnormal” level of hedonic tone.
+```
+
+# Test my Brain (TMB)
+```{r}
+library(dplyr)
+
+tmb_dsm <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/tmb/tmb_dsm01.csv"), header = T, skip = 1)
+tmb_fch <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/tmb/tmb_fch01.csv"), header = T, skip = 1)
+tmb_fr <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/tmb/tmb_fr01.csv"), header = T, skip = 1)
+tmb_gradcpt <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/tmb/tmb_gradcpt01.csv"), header = T, skip = 1)
+tmb_mer <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/tmb/tmb_mer01.csv"), header = T, skip = 1)
+tmb_mr <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/tmb/tmb_mr01.csv"), header = T, skip = 1)
+tmb_wsap <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/tmb/tmb_wsap01.csv"), header = T, skip = 1)
+
+tmb_raw <- tmb_dsm |>
+  full_join(tmb_fch, by = "subjectkey") |>
+  full_join(tmb_fr, by = "subjectkey") |>
+  full_join(tmb_gradcpt, by = "subjectkey") |>
+  full_join(tmb_mer, by = "subjectkey") |>
+  full_join(tmb_mr, by = "subjectkey") |>
+  full_join(tmb_wsap, by = "subjectkey")
+
+tmb_raw <- tmb_raw[, c("subjectkey", "tmb_dsm_score", "tmb_choice_score", "tmb_fast_score", "tmb_gcpt_score", "tmb_mer_score", "tmb_matrix_score", "tmb_word_score")]
+tmb_total <- tmb_raw[, c("subjectkey", "tmb_dsm_score", "tmb_choice_score", "tmb_fast_score", "tmb_gcpt_score", "tmb_mer_score", "tmb_matrix_score", "tmb_word_score")]
+
+rm("tmb_dsm", "tmb_fch", "tmb_fr", "tmb_gradcpt", "tmb_mer", "tmb_mr", "tmb_wsap")
+```
+
+# Stroop
+```{r}
+stroop_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/stroop01.csv"), header = T, skip = 1)
+stroop_raw[stroop_raw$stroop_tot_inc_num_nonresp > 2 | stroop_raw$stroop_tot_con_num_nonresp > 5, -1] <- NA
+stroop_total <- stroop_raw[, c("subjectkey", "stroopincacc", "stroop_tot_inc_medRT_corr")] # total correct incongruent
+stroop_raw <- stroop_raw[, c("subjectkey", "stroopincacc", "stroop_tot_inc_medRT_corr")] # Stroop incongruent trials total median RT for correct trials
+```
+
+# Hammer
+```{r}
+hammer_raw <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/hammer01.csv"), header = T, skip = 1)
+hammer_raw[hammer_raw$hammer_tot_num_err > 10, -1] <- NA
+hammer_total <- hammer_raw[, c("subjectkey", "hammer_tot_medRT_corr")]
+hammer_raw <- hammer_raw[, c("subjectkey", "hammer_faces_medRT_corr", "hammer_shapes_medRT_corr")]
+```
+
+# Demographics
+```{r}
+demos <- read.csv(here("./data/behaviour/raw/230619_Data_Release/NDArawdata/data/demos.csv"), header = T, skip = 1, fileEncoding = "latin1")
+demos[demos == 999] <- NA
+```
+
+# Merge, transfrom and clean clin admin
+```{r merge clin admin, eval=FALSE}
+all_clin_admin <- asc_tot |>
+  full_join(cgi_tot, by = "subjectkey") |>
+  full_join(cssrs_tot, by = "subjectkey") |>
+  full_join(lrift_tot, by = "subjectkey") |>
+  full_join(madras_tot, by = "subjectkey") |>
+  full_join(mcas_tot, by = "subjectkey") |>
+  full_join(panss_raw, by = "subjectkey") |>
+  full_join(pdss_tot, by = "subjectkey") |>
+  full_join(ymrs_tot, by = "subjectkey")
+
+# draw hist
+all_clin_admin_melt <- melt(all_clin_admin)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+```{r tranform clin admin, eval=FALSE}
+# Transform
+library(bestNormalize)
+all_clin_admin_trans <- data.frame(matrix(NA, nrow(all_clin_admin), ncol(all_clin_admin)))
+
+cl <- parallel::makeCluster(10)
+for (s in 2:ncol(all_clin_admin)) {
+  all_clin_admin_trans[, s] <- bestNormalize(all_clin_admin[, s], loo = T, cluster = cl)$chosen_transform$x.t
+}
+
+all_clin_admin_trans[, 1] <- all_clin_admin[, 1]
+colnames(all_clin_admin_trans) <- colnames(all_clin_admin)
+all_clin_admin_melt <- melt(all_clin_admin_trans)
+
+#visualize dist
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+# binarize skewed vars
+bin_vec <- c(
+  "cgi_tot", "cssrs_isi", "lrtot", "madrstot", "panss_pos_clean",
+  "panss_neg_clean", "panss_gen_clean", "pdss_tot", "ymrs_tot"
+)
+all_clin_admin_trans[, bin_vec] <- apply(all_clin_admin[, bin_vec], 2, \(x) {
+  binarize(x, location_measure = min(x, na.rm = T))$x.t
+})
+all_clin_admin_melt <- melt(all_clin_admin_trans)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+
+# Merge, transfrom and clean self report
+```{r self report 1, eval=FALSE}
+all_self_report_1 <- atc_total |>
+  full_join(bapq_raw, by = "subjectkey") |>
+  full_join(bis_raw, by = "subjectkey") |>
+  full_join(bisbas_raw, by = "subjectkey") |>
+  full_join(ctq_total, by = "subjectkey")
+
+all_clin_admin_melt <- melt(all_self_report_1)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+# Transform CTQ
+ctq_names <- c("ctqcore_ea", "ctqcore_en", "ctqcore_pa", "ctqcore_pn", "ctqcore_sa", "ctqcore_val")
+all_self_report_1_tras <- all_self_report_1
+all_self_report_1_tras[, ctq_names] <- apply(all_self_report_1_tras[, ctq_names], 2, \(x) {
+  bestNormalize(x, loo = T, cluster = cl)$chosen_transform$x.t
+})
+
+#visualize dist
+all_clin_admin_melt <- melt(all_self_report_1_tras)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+# transform did not go well, so binarise the following
+ctq_names <- c("ctqcore_ea", "ctqcore_en", "ctqcore_pa", "ctqcore_pn", "ctqcore_sa", "ctqcore_val")
+all_self_report_1_tras <- all_self_report_1
+all_self_report_1_tras[, ctq_names] <- apply(all_self_report_1_tras[, ctq_names], 2, \(x) {
+  binarize(x, location_measure = min(x, na.rm = T))$x.t
+})
+
+all_clin_admin_melt <- melt(all_self_report_1_tras)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+```{r self report 2, eval=FALSE}
+all_self_report_2 <- dospert_raw |>
+  full_join(ftnd_raw, by     = "subjectkey") |>
+  full_join(MSPSS_raw, by    = "subjectkey") |>
+  full_join(neoffi_total, by = "subjectkey") |>
+  full_join(qids_total, by   = "subjectkey") |>
+  full_join(stai_total, by   = "subjectkey")
+
+all_clin_admin_melt <- melt(all_self_report_2)
+
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+# Transform skewed vars
+transform_names <- c("ftnd_score_total", "mspss_fam", "mspss_fri", "mspss_so")
+all_self_report_2_tras <- all_self_report_2
+all_self_report_2_tras[, transform_names] <- apply(all_self_report_2_tras[, transform_names], 2, \(x) {
+  bestNormalize(x, loo = T, cluster = cl)$chosen_transform$x.t
+})
+
+all_clin_admin_melt <- melt(all_self_report_2_tras)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+# transform did not go well, so binarise
+all_self_report_2_tras <- all_self_report_2
+transform_names <- c("mspss_fam", "mspss_fri", "mspss_so")
+all_self_report_2_tras[, transform_names] <- apply(all_self_report_2_tras[, transform_names], 2, \(x) {
+  binarize(x, location_measure = median(x, na.rm = T))$x.t
+})
+transform_names <- c("ftnd_score_total")
+all_self_report_2_tras[, transform_names] <- binarize(all_self_report_2_tras[, transform_names], location_measure = 0)$x.t
+
+all_clin_admin_melt <- melt(all_self_report_2_tras)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+
+```{r self report 3, eval=FALSE}
+all_self_report_3 <- tci_raw |>
+  full_join(anxsi_total, by = "subjectkey") |>
+  full_join(dass_total, by  = "subjectkey") |>
+  full_join(poms_raw, by    = "subjectkey") |>
+  full_join(pss_raw, by     = "subjectkey") |>
+  full_join(sils_raw, by    = "subjectkey") |>
+  full_join(teps_raw, by    = "subjectkey")
+
+all_clin_admin_melt <- melt(all_self_report_3)
+
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+# Transform skewed vars
+transform_names <- c("dass_depr_sc", "dass_anx_sc", "dass_stress_sc", "poms_tscore_ten_anx", "poms_tscore_dep_dej")
+all_self_report_3_tras <- all_self_report_3
+all_self_report_3_tras[, transform_names] <- apply(all_self_report_3_tras[, transform_names], 2, \(x) {
+  binarize(x, location_measure = median(x, na.rm = T))$x.t
+})
+
+all_clin_admin_melt <- melt(all_self_report_3_tras)
+
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+```{r self-report 4,  eval=FALSE}
+all_self_report_4 <- cerq_total |>
+  full_join(cfq_raw, by   = "subjectkey") |>
+  full_join(crt_total, by = "subjectkey") |>
+  full_join(ecr_total, by = "subjectkey") |>
+  full_join(pum_total, by = "subjectkey") |>
+  full_join(rrs_total, by = "subjectkey") |>
+  full_join(rsri_raw, by  = "subjectkey") |>
+  full_join(shaps_raw, by = "subjectkey")
+
+all_clin_admin_melt <- melt(all_self_report_4)
+
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+transform_names <- c("cerq_acceptance", "cerq_positive_refocus", "cerq_refocus_plan", "cerq_positive_reappraisal", "cerq_catastrophe", "cerq_other_blame", "crt_3_corr_score", "pum_tot_sum_score", "shaps_total")
+all_self_report_4_tras <- all_self_report_4
+all_self_report_4_tras[, transform_names] <- apply(all_self_report_4_tras[, transform_names], 2, \(x) {
+  binarize(x, location_measure = median(x, na.rm = T))$x.t
+})
+
+transform_names <- c("rrs_tot_sum_score")
+all_self_report_4_tras[, transform_names] <- bestNormalize(all_self_report_4_tras[, transform_names], loo = T, cluster = cl)$chosen_transform$x.t
+
+all_clin_admin_melt <- melt(all_self_report_4_tras)
+ggplot(data = all_clin_admin_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+```{r TMBstroophammer, eval=FALSE}
+all_cogs <- tmb_total |>
+  full_join(stroop_raw, by = "subjectkey") |>
+  full_join(hammer_raw, by = "subjectkey")
+
+all_cogs_melt <- melt(all_cogs)
+ggplot(data = all_cogs_melt, aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+
+
+transform_names <- names(all_cogs)[-1]
+all_cogs_tras <- all_cogs
+all_cogs_tras[, transform_names] <- apply(all_cogs_tras[, transform_names], 2, \(x) {
+  bestNormalize(x, loo = T, cluster = cl)$chosen_transform$x.t
+})
+transform_names <- c("stroopincacc")
+all_cogs_tras[, transform_names] <- binarize(all_cogs[, transform_names], location_measure = 46)$x.t
+
+
+ggplot(data = melt(all_cogs_tras), aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~variable, scales = "free")
+```
+
+# Merge all scales before exclusions and write out
+```{r, merge all before exclusions and write out}
+library(corrplot)
+
+all_merge <- all_clin_admin_trans |>
+  full_join(all_self_report_1_tras, by = "subjectkey") |>
+  full_join(all_self_report_2_tras, by = "subjectkey") |>
+  full_join(all_self_report_3_tras, by = "subjectkey") |>
+  full_join(all_self_report_4_tras, by = "subjectkey") |>
+  full_join(all_cogs_tras, by = "subjectkey")
+
+all_merge_noTrans <- all_clin_admin |>
+  full_join(all_self_report_1, by = "subjectkey") |>
+  full_join(all_self_report_2, by = "subjectkey") |>
+  full_join(all_self_report_3, by = "subjectkey") |>
+  full_join(all_self_report_4, by = "subjectkey") |>
+  full_join(all_cogs, by = "subjectkey")
+
+saveRDS(all_merge, "output/behav_data_prep/all_merge.RDS")
+saveRDS(all_merge_noTrans, "output/behav_data_prep/all_merge_noTrans.RDS")
+```
+
+# Imputation 
+
+```{r compute missing data}
+library(missCompare)
+library(svglite)
+# Compute missing data percentages for each row and column
+missing_row_perc <- rowMeans(is.na(all_merge)) * 100
+missing_col_perc <- colMeans(is.na(all_merge)) * 100
+
+hist(missing_row_perc)
+hist(missing_col_perc)
+
+rows_left_mat <- matrix(NA, 17, 17)
+cols_left_mat <- matrix(NA, 17, 17)
+pct_missing <- matrix(NA, 17, 17)
+
+x <- 1
+for (c in seq(0.1, 0.9, 0.05)) {
+  y <- 1
+  for (r in seq(0.1, 0.9, 0.05)) {
+    temp_mat <- clean(all_merge[, -1],
+      var_removal_threshold = c,
+      ind_removal_threshold = r,
+      missingness_coding = NA,
+      var_remove = "subjectkey"
+    )
+    rows_left_mat[y, x] <- nrow(temp_mat)
+    cols_left_mat[y, x] <- ncol(temp_mat)
+    pct_missing[y, x] <- (sum(is.na(temp_mat)) / (dim(temp_mat)[1] * dim(temp_mat)[2])) * 100
+    y <- y + 1
+  }
+  x <- x + 1
+  print(c)
+}
+
+row.names(rows_left_mat) <- row.names(cols_left_mat) <- seq(0.1, 0.9, 0.05)
+colnames(rows_left_mat) <- colnames(cols_left_mat) <- seq(0.1, 0.9, 0.05)
+colnames(pct_missing) <- row.names(pct_missing) <- seq(0.1, 0.9, 0.05)
+
+svglite("output/behav_data_prep/figures/sup_impute_fig_p1a.svg")
+p1 <- corrplot(pct_missing, is.corr = F, method = "color", tl.cex = 0.5)
+dev.off()
+
+svglite("output/behav_data_prep/figures/sup_impute_fig_p1b.svg")
+p2 <- corrplot(cols_left_mat, is.corr = F, method = "color", tl.cex = 0.5)
+dev.off()
+
+svglite("output/behav_data_prep/figures/sup_impute_fig_p1c.svg")
+p3 <- corrplot(rows_left_mat, is.corr = F, method = "color", tl.cex = 0.5)
+dev.off()
+```
+
+```{r missCompare cleaning}
+# https://cran.r-project.org/web/packages/missCompare/vignettes/misscompare.html
+library(missCompare)
+
+all_merge_clean <- clean(all_merge,
+  var_removal_threshold = .25,
+  ind_removal_threshold = .2,
+  missingness_coding = NA, var_remove = "subjectkey"
+)
+
+all_merge_clean_noTrans <- clean(all_merge_noTrans,
+  var_removal_threshold = .25,
+  ind_removal_threshold = .2,
+  missingness_coding = NA,
+  var_remove = "subjectkey"
+)
+
+selected_inds <- as.numeric(row.names(all_merge_clean_noTrans))
+selected_ids <- all_merge_noTrans[selected_inds, "subjectkey"]
+write.table(selected_ids, "output/behav_data_prep/clean_selected_ids_n191.txt")
+
+dim(all_merge_clean)
+metadata <- get_data(all_merge_clean,
+  matrixplot_sort = T,
+  plot_transform = T
+)
+metadata$Complete_cases
+metadata$min_PDM_thresholds
+metadata$Cluster_plot
+metadata$NA_Correlation_plot
+p1 <- metadata$Matrix_plot
+p1 <- p1 + ggeasy::easy_remove_x_axis()
+
+svglite("output/behav_data_prep/figures/sup_impute_fig_p2b.svg")
+p1
+dev.off()
+
+all_merge_noClean <- clean(all_merge,
+  var_removal_threshold = 1,
+  ind_removal_threshold = 1,
+  missingness_coding = NA, var_remove = "subjectkey"
+)
+metadata_noClean <- get_data(all_merge_noClean,
+  matrixplot_sort = T,
+  plot_transform = T
+)
+p1 <- metadata_noClean$Matrix_plot
+p1 <- p1 + ggeasy::easy_remove_x_axis()
+svglite("output/behav_data_prep/figures/sup_impute_fig_p2a.svg")
+p1
+dev.off()
+```
+
+```{r missCompare simulate}
+all_merge_clean_imputed <- missCompare::impute_simulated(
+  rownum = metadata$Rows,
+  colnum = metadata$Columns,
+  cormat = metadata$Corr_matrix,
+  MD_pattern = metadata$MD_Pattern,
+  NA_fraction = metadata$Fraction_missingness,
+  min_PDM = 2,
+  n.iter = 50,
+  assumed_pattern = NA
+)
+saveRDS(object = all_merge_clean_imputed, file = "output/behav_data_prep/missCompare_10pct_10pct_impute_simulated.RDS")
+all_merge_clean_imputed <- readRDS("output/behav_data_prep/missCompare_10pct_10pct_impute_simulated.RDS")
+
+svglite("output/behav_data_prep/figures/sup_impute_fig_p3a.svg", height = 5, width = 15)
+all_merge_clean_imputed$Plot_RMSE
+dev.off()
+
+svglite("output/behav_data_prep/figures/sup_impute_fig_p3b.svg", height = 5, width = 15)
+all_merge_clean_imputed$Plot_MAE
+dev.off()
+# all_merge_clean_imputed$Plot_KS
+# all_merge_clean_imputed$Plot_TIME
+```
+
+```{r missCompare Impute}
+all_merge_clean_missForest <- missCompare::impute_data(all_merge_clean_noTrans,
+  scale = F,
+  n.iter = 10,
+  sel_method = c(14)
+) # 14 is the code for missForest
+
+all_merge_clean_missForest_imputed <- all_merge_clean_missForest$missForest_imputation[[1]]
+
+
+all_merge_corplot <- cor(scale(all_merge_clean_missForest_imputed), use = "pairwise.complete.obs")
+diag(all_merge_corplot) <- 0
+corrplot(all_merge_corplot, tl.cex = 0.2, order = "hclust", method = "color", tl.srt = 45)
+# corrplot(as.matrix(scale(all_merge_clean_missForest_imputed)), is.corr = F, tl.cex = 0.1)
+
+# diag <- missCompare::post_imp_diag(all_merge_clean,
+#                                   all_merge_clean_missForest$missForest_imputation[[1]],
+#                                   scale=T,
+#                                   n.boot = 5)
+saveRDS(all_merge_clean_missForest_imputed, "output/behav_data_prep/all_merge_clean_missForest_imputed.rds")
+all_merge_clean_missForest_imputed <- readRDS("output/behav_data_prep/all_merge_clean_missForest_imputed.rds")
+all_merge_corplot <- cor(scale(all_merge_clean_missForest_imputed), use = "pairwise.complete.obs")
+diag(all_merge_corplot) <- 0
+
+svglite("output/behav_data_prep/figures/sup_impute_fig_p4b.svg", height = 8, width = 8)
+corrplot(all_merge_corplot, tl.cex = 0.2, method = "color", tl.srt = 45)
+dev.off()
+
+
+all_merge_corplot <- cor(scale(all_merge_clean), use = "pairwise.complete.obs")
+diag(all_merge_corplot) <- 0
+svglite("output/behav_data_prep/figures/sup_impute_fig_p4a.svg", height = 8, width = 8)
+corrplot(all_merge_corplot, tl.cex = 0.2, method = "color", tl.srt = 45)
+dev.off()
+```
