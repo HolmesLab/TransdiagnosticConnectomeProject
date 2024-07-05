@@ -1,0 +1,1353 @@
+---
+title: "Generating QC-FC figures for TCP data release"
+output: html_notebook
+---
+
+```{r import libraries}
+library(reticulate)
+np <- import("numpy")
+library(pbapply)
+library(parallel)
+library(patchwork)
+library(superheat)
+library(pals)
+library(magick)
+library(ggplot2)
+library(patchwork)
+library(psych)
+library(abind)
+library(data.table)
+library(ggplotify)
+library(rcartocolor)
+library(bio3d)
+library(ggeasy)
+source("~/Dropbox/Sid/R_files/functions/vec_2_mat.R")
+source("~/Dropbox/Sid/R_files/functions/mat_2_vec.R")
+rgb2hex <- function(r, g, b) rgb(r, g, b, maxColorValue = 255)
+cor2 <- \(x) {
+  1 / (NROW(x) - 1) * crossprod(scale(x, TRUE, TRUE))
+}
+labs <- readxl::read_excel("../data/brain/whole_brain_region_network_order_info_TCP_release.xlsx")
+```
+
+```{r read in .npy and create R data files}
+# read in subjlist
+subjlist <- list.files("../data/brain/FC_mats/", pattern = "NDAR_")
+
+cl <- makeCluster(10)
+
+
+# Rest scans
+rest_minProc <- rest_minProc.fix <- rest_minProc.fix.gsr <- list()
+ind <- 1
+for (a in c("AP", "PA")) {
+  for (r in 1:2) {
+    # minProc
+    minProc.flist <- paste0("/Users/sidchopra/Dropbox/Sid/R_files/TCP_data_release/data/brain/FC_mats/", subjlist, "/rest_FC/FC_pearson_task-rest", a, "_run-0", r, "_bold_Atlas_NonVN_From_Surface_Whole_Brain_Ordered_Cereb_Sep.npy")
+    minProc.flist.exists <- minProc.flist[file.exists(minProc.flist)]
+    rest_minProc[[ind]] <- pblapply(minProc.flist.exists, np$load, cl = 10)
+    names(rest_minProc[[ind]]) <- subjlist[file.exists(minProc.flist)]
+
+    # minProc.fix
+    minProc.fix.flist <- paste0("/Users/sidchopra/Dropbox/Sid/R_files/TCP_data_release/data/brain/FC_mats/", subjlist, "/rest_FC/FC_pearson_task-rest", a, "_run-0", r, "_bold_Atlas_MSMAll_hp2000_clean_NonVN_From_Surface_Whole_Brain_Ordered_Cereb_Sep.npy")
+    minProc.fix.flist.exists <- minProc.fix.flist[file.exists(minProc.fix.flist)]
+    rest_minProc.fix[[ind]] <- pblapply(minProc.fix.flist.exists, np$load, cl = 10)
+    names(rest_minProc.fix[[ind]]) <- subjlist[file.exists(minProc.fix.flist)]
+
+    # minProc.fix.gsr
+    minProc.fix.gsr.flist <- paste0("/Users/sidchopra/Dropbox/Sid/R_files/TCP_data_release/data/brain/FC_mats/", subjlist, "/rest_FC/FC_pearson_task-rest", a, "_run-0", r, "_bold_Atlas_MSMAll_hp2000_clean_NonVN_NoDerivs_GSR_From_Surface_Whole_Brain_Ordered_Cereb_Sep.npy")
+    minProc.fix.gsr.flist.exists <- minProc.fix.gsr.flist[file.exists(minProc.fix.gsr.flist)]
+    rest_minProc.fix.gsr[[ind]] <- pblapply(minProc.fix.gsr.flist.exists, np$load, cl = 10)
+    names(rest_minProc.fix.gsr[[ind]]) <- subjlist[file.exists(minProc.fix.gsr.flist)]
+    ind <- ind + 1
+  }
+}
+gc()
+
+
+# task scans
+task_minProc <- task_minProc.fix <- task_minProc.fix.gsr <- list()
+ind <- 1
+for (a in c("AP", "PA")) {
+  for (t in c("stroop", "hammer")) {
+    # minProc
+    minProc.flist <- paste0("/Users/sidchopra/Dropbox/Sid/R_files/TCP_data_release/data/brain/FC_mats/", subjlist, "/task_FC/FC_pearson_task-", t, a, "_run-01_bold_Atlas_NonVN_From_Surface_Whole_Brain_Ordered_Cereb_Sep.npy")
+    minProc.flist.exists <- minProc.flist[file.exists(minProc.flist)]
+    task_minProc[[ind]] <- pblapply(minProc.flist.exists, np$load, cl = 10)
+    names(task_minProc[[ind]]) <- subjlist[file.exists(minProc.flist)]
+
+    # minProc.fix
+    minProc.fix.flist <- paste0("/Users/sidchopra/Dropbox/Sid/R_files/TCP_data_release/data/brain/FC_mats/", subjlist, "/task_FC/FC_pearson_task-", t, a, "_run-01_bold_Atlas_MSMAll_hp2000_clean_NonVN_From_Surface_Whole_Brain_Ordered_Cereb_Sep.npy")
+    minProc.fix.flist.exists <- minProc.fix.flist[file.exists(minProc.fix.flist)]
+    task_minProc.fix[[ind]] <- pblapply(minProc.fix.flist.exists, np$load, cl = 10)
+    names(task_minProc.fix[[ind]]) <- subjlist[file.exists(minProc.fix.flist)]
+
+    # minProc.fix.gsr
+    minProc.fix.gsr.flist <- paste0("/Users/sidchopra/Dropbox/Sid/R_files/TCP_data_release/data/brain/FC_mats/", subjlist, "/task_FC/FC_pearson_task-", t, a, "_run-01_bold_Atlas_MSMAll_hp2000_clean_NonVN_NoDerivs_GSR_From_Surface_Whole_Brain_Ordered_Cereb_Sep.npy")
+    minProc.fix.gsr.flist.exists <- minProc.fix.gsr.flist[file.exists(minProc.fix.gsr.flist)]
+    task_minProc.fix.gsr[[ind]] <- pblapply(minProc.fix.gsr.flist.exists, np$load, cl = 10)
+    names(task_minProc.fix.gsr[[ind]]) <- subjlist[file.exists(minProc.fix.gsr.flist)]
+    ind <- ind + 1
+  }
+}
+gc()
+```
+
+```{r plot_matrix function}
+plot_matrix <- function(mat = NULL,
+                        title = "",
+                        smooth = F,
+                        save.tiff = F,
+                        save.eps = F,
+                        save.svg = F,
+                        filename = NULL,
+                        colour.pal = rev(brewer.rdbu(101)),
+                        heat.lim = c(-1, 1.001),
+                        membership.cols = NULL,
+                        membership.rows = NULL,
+                        left.label.col = NULL,
+                        bottom.label.col = NULL,
+                        legend = T,
+                        cluster = F) {
+  if (save.tiff == T) {
+    tiff(filename, width = 4.75, height = 6, units = "in", res = 300, type = c("cairo"))
+  }
+  if (save.eps == T) {
+    setEPS()
+    postscript(filename, width = 4.75, height = 6)
+  }
+  if (save.svg == T) {
+    svg(filename, width = 4.75, height = 6)
+  }
+  # atlas_labs <- readxl::read_xlsx("/Users/sidchopra/Dropbox/BioBank_shared_SC_WO/data/atlas_labels.xlsx", sheet = 1)
+  # atlas_labs <- readxl::read_xlsx("../data/atlas_labels.xlsx", sheet = 1)
+
+  message("This function reorders the matrix into clusters/networks for visualisation. So lh/rh networks will be grouped togeather automatically. Use the smooth_matrix function to avoid this. If you smooth, the median vlaue is used. Use the smooth_matrix function first for mean value.")
+  p <- superheat(
+    X = mat,
+    membership.rows = membership.rows,
+    membership.cols = membership.cols,
+    left.label.col = left.label.col,
+    bottom.label.col = bottom.label.col,
+    left.label.size = 0.04,
+    left.label.text.size = 0,
+    bottom.label.size = 0.04,
+    bottom.label.text.size = 0,
+    bottom.label.text.angle = 90,
+    # extreme.values.na       = F, # commented out by winnie
+    grid.hline.size = 0.3,
+    grid.vline.size = 0.3,
+    heat.pal = colour.pal,
+    heat.lim = heat.lim,
+    heat.pal.values = seq(0, 1, 0.1),
+    title = title,
+    # title.alignment         = "center", # commented out by winnie
+    title.size = 6,
+    smooth.heat = smooth,
+    legend = legend,
+    legend.height = 0.05,
+    legend.width = .7,
+    legend.text.size = 7,
+    heat.na.col = "white",
+    pretty.order.rows = cluster,
+    pretty.order.cols = cluster
+  )
+  if (save.tiff == T | save.eps == T | save.svg == T) {
+    while (!is.null(dev.list())) dev.off()
+  }
+  return(p)
+}
+```
+
+```{r Plot fc mats for qc report, fig.width=3.4, fig.height=3.8, eval=FALSE}
+width <- 6.5
+height <- 7
+for (s in 1:length(subjlist)) {
+  p1 <- plot_matrix(minProc[[s]], legend = F)
+  ggsave("../output/temp//temp1.png", p1$plot, width = width, height = height)
+  p1 <- image_read("../output/temp//temp1.png")
+
+  p2 <- plot_matrix(minProc.fix[[s]], legend = F)
+  ggsave("../output/temp//temp2.png", p2$plot, width = width, height = height)
+  p2 <- image_read("../output/temp//temp2.png")
+
+  p3 <- plot_matrix(minProc.fix.gsr[[s]], legend = F)
+  ggsave("../output/temp//temp3.png", p3$plot, width = width, height = height)
+  p3 <- image_read("../output/temp//temp3.png")
+
+  combined <- image_append(c(p1, p2, p3))
+  combined <- image_annotate(combined, subjlist[s], size = 80)
+  combined
+}
+```
+
+```{r plot mean FC mat for each scan at each processing step, eval=FALSE}
+cl <- makeCluster(10)
+
+rest_ap1_minProc_mean <- pbapply(fisherz(abind(rest_minProc[[1]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+rest_ap2_minProc_mean <- pbapply(fisherz(abind(rest_minProc[[2]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+rest_pa1_minProc_mean <- pbapply(fisherz(abind(rest_minProc[[3]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+rest_pa2_minProc_mean <- pbapply(fisherz(abind(rest_minProc[[4]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+
+rest_ap1_minProc.fix_mean <- pbapply(fisherz(abind(rest_minProc.fix[[1]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+rest_ap2_minProc.fix_mean <- pbapply(fisherz(abind(rest_minProc.fix[[2]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+rest_pa1_minProc.fix_mean <- pbapply(fisherz(abind(rest_minProc.fix[[3]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+rest_pa2_minProc.fix_mean <- pbapply(fisherz(abind(rest_minProc.fix[[4]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+
+rest_ap1_minProc.fix.gsr_mean <- pbapply(fisherz(abind(rest_minProc.fix.gsr[[1]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+rest_ap2_minProc.fix.gsr_mean <- pbapply(fisherz(abind(rest_minProc.fix.gsr[[2]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+rest_pa1_minProc.fix.gsr_mean <- pbapply(fisherz(abind(rest_minProc.fix.gsr[[3]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+rest_pa2_minProc.fix.gsr_mean <- pbapply(fisherz(abind(rest_minProc.fix.gsr[[4]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+
+task_ap_stroop_minProc_mean <- pbapply(fisherz(abind(task_minProc[[1]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+task_ap_hammer_minProc_mean <- pbapply(fisherz(abind(task_minProc[[2]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+task_pa_stroop_minProc_mean <- pbapply(fisherz(abind(task_minProc[[3]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+
+task_ap_stroop_minProc.fix_mean <- pbapply(fisherz(abind(task_minProc.fix[[1]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+task_ap_hammer_minProc.fix_mean <- pbapply(fisherz(abind(task_minProc.fix[[2]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+task_pa_stroop_minProc.fix_mean <- pbapply(fisherz(abind(task_minProc.fix[[3]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+
+task_ap_stroop_minProc.fix.gsr_mean <- pbapply(fisherz(abind(task_minProc.fix.gsr[[1]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+task_ap_hammer_minProc.fix.gsr_mean <- pbapply(fisherz(abind(task_minProc.fix.gsr[[2]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+task_pa_stroop_minProc.fix.gsr_mean <- pbapply(fisherz(abind(task_minProc.fix.gsr[[3]], along = 3)), 1:2, mean, na.rm = TRUE, cl = cl)
+gc()
+
+mean_mat_names <- c(
+  "rest_ap1_minProc_mean", "rest_ap2_minProc_mean", "rest_pa1_minProc_mean", "rest_pa2_minProc_mean",
+  "rest_ap1_minProc.fix_mean", "rest_ap2_minProc.fix_mean", "rest_pa1_minProc.fix_mean", "rest_pa2_minProc.fix_mean",
+  "rest_ap1_minProc.fix.gsr_mean", "rest_ap2_minProc.fix.gsr_mean", "rest_pa1_minProc.fix.gsr_mean", "rest_pa2_minProc.fix.gsr_mean",
+  "task_ap_stroop_minProc_mean", "task_ap_hammer_minProc_mean", "task_pa_stroop_minProc_mean",
+  "task_ap_stroop_minProc.fix_mean", "task_ap_hammer_minProc.fix_mean", "task_pa_stroop_minProc.fix_mean",
+  "task_ap_stroop_minProc.fix.gsr_mean", "task_ap_hammer_minProc.fix.gsr_mean", "task_pa_stroop_minProc.fix.gsr_mean"
+)
+
+mean_mats <- list(
+  rest_ap1_minProc_mean, rest_ap2_minProc_mean, rest_pa1_minProc_mean, rest_pa2_minProc_mean,
+  rest_ap1_minProc.fix_mean, rest_ap2_minProc.fix_mean, rest_pa1_minProc.fix_mean, rest_pa2_minProc.fix_mean,
+  rest_ap1_minProc.fix.gsr_mean, rest_ap2_minProc.fix.gsr_mean, rest_pa1_minProc.fix.gsr_mean, rest_pa2_minProc.fix.gsr_mean,
+  task_ap_stroop_minProc_mean, task_ap_hammer_minProc_mean, task_pa_stroop_minProc_mean,
+  task_ap_stroop_minProc.fix_mean, task_ap_hammer_minProc.fix_mean, task_pa_stroop_minProc.fix_mean,
+  task_ap_stroop_minProc.fix.gsr_mean, task_ap_hammer_minProc.fix.gsr_mean, task_pa_stroop_minProc.fix.gsr_mean
+)
+mean_mats <- lapply(mean_mats, \(x){
+  x[is.infinite(x)] <- 0
+  round(fisherz2r(x), 3)
+})
+
+
+for (m in 1:length(mean_mats)) {
+  write.table(mean_mats[[m]], paste0("../output/brain/qc_report/mean_fc_mats/", mean_mat_names[m], ".txt"), col.names = F, row.names = F)
+}
+```
+
+```{r plot mean mats}
+mean_mat_names <- c(
+  "rest_ap1_minProc_mean", "rest_ap1_minProc.fix_mean", "rest_ap1_minProc.fix.gsr_mean",
+  "rest_ap2_minProc_mean", "rest_ap2_minProc.fix_mean", "rest_ap2_minProc.fix.gsr_mean",
+  "rest_pa1_minProc_mean", "rest_pa1_minProc.fix_mean", "rest_pa1_minProc.fix.gsr_mean",
+  "rest_pa2_minProc_mean", "rest_pa2_minProc.fix_mean", "rest_pa2_minProc.fix.gsr_mean",
+  "task_ap_stroop_minProc_mean", "task_ap_stroop_minProc.fix_mean", "task_ap_stroop_minProc.fix.gsr_mean",
+  "task_pa_stroop_minProc_mean", "task_pa_stroop_minProc.fix_mean", "task_pa_stroop_minProc.fix.gsr_mean",
+  "task_ap_hammer_minProc_mean", "task_ap_hammer_minProc.fix_mean", "task_ap_hammer_minProc.fix.gsr_mean"
+)
+mean_mat <- list()
+for (m in 1:length(mean_mat_names)) {
+  mean_mat[[m]] <- as.data.frame(fread(paste0("../output/brain/qc_report/mean_fc_mats/", mean_mat_names[m], ".txt")))
+}
+names(mean_mat) <- mean_mat_names
+
+
+width <- 6.5
+height <- 7
+
+plot_list <- list()
+ind <- 0
+for (s in 1:4) {
+  p1 <- plot_matrix(fisherz2r(mean_mat[[ind + 1]]), legend = F, heat.lim = c(-0.7, 0.9))
+  ggsave("../output/temp//temp1.png", p1$plot, width = width, height = height)
+  p1 <- image_read("../output/temp//temp1.png")
+
+  p2 <- plot_matrix(fisherz2r(mean_mat[[ind + 2]]), legend = F, heat.lim = c(-0.7, 0.9))
+  ggsave("../output/temp//temp2.png", p2$plot, width = width, height = height)
+  p2 <- image_read("../output/temp//temp2.png")
+
+  p3 <- plot_matrix(fisherz2r(mean_mat[[ind + 3]]), legend = F, heat.lim = c(-0.7, 0.9))
+  ggsave("../output/temp//temp3.png", p3$plot, width = width, height = height)
+  p3 <- image_read("../output/temp//temp3.png")
+
+  plot_list[[s]] <- image_append(c(p1, p2, p3), stack = T)
+  ind <- ind + 3
+}
+image_append(c(plot_list[[1]], plot_list[[2]], plot_list[[3]], plot_list[[4]]))
+
+# add netlabs
+cols <- labs$`Network color code (RGB/255)`
+cols <- stringr::str_split(cols, ",", simplify = T)
+cols <- apply(cols, 2, as.numeric)
+cols <- cols * 255
+cols <- rgb2hex(r = cols[, 1], g = cols[, 2], b = cols[, 3])
+
+
+plot_list <- list()
+ind <- 0
+for (s in 1:4) {
+  p1 <- plot_matrix(fisherz2r(mean_mat[[ind + 1]]),
+    legend = F, heat.lim = c(-0.7, 0.9),
+    membership.cols = labs$`Network name (abbrev.)`,
+    membership.rows = labs$`Network name (abbrev.)`,
+    left.label.col = unique(cols),
+    bottom.label.col = unique(cols)
+  )
+
+  ggsave("../output/temp//temp1.png", p1$plot, width = width, height = height)
+  p1 <- image_read("../output/temp//temp1.png")
+
+  p2 <- plot_matrix(fisherz2r(mean_mat[[ind + 2]]),
+    legend = F, heat.lim = c(-0.7, 0.9),
+    membership.cols = labs$`Network name (abbrev.)`,
+    membership.rows = labs$`Network name (abbrev.)`,
+    left.label.col = unique(cols), bottom.label.col = unique(cols)
+  )
+  ggsave("../output/temp//temp2.png", p2$plot, width = width, height = height)
+  p2 <- image_read("../output/temp//temp2.png")
+
+  p3 <- plot_matrix(fisherz2r(mean_mat[[ind + 3]]),
+    legend = F, heat.lim = c(-0.7, 0.9),
+    membership.cols = labs$`Network name (abbrev.)`,
+    membership.rows = labs$`Network name (abbrev.)`,
+    left.label.col = unique(cols),
+    bottom.label.col = unique(cols)
+  )
+  ggsave("../output/temp//temp3.png", p3$plot, width = width, height = height)
+  p3 <- image_read("../output/temp//temp3.png")
+
+  plot_list[[s]] <- image_append(c(p1, p2, p3), stack = T)
+  ind <- ind + 3
+}
+image_append(c(plot_list[[1]], plot_list[[2]], plot_list[[3]], plot_list[[4]]))
+
+
+plot_list <- list()
+ind <- 0
+for (s in 1:4) {
+  p1 <- plot_matrix(fisherz2r(mean_mat[[ind + 1]]),
+    legend = F, heat.lim = c(-0.7, 0.9),
+    membership.cols = labs$`Network name (abbrev.)`,
+    membership.rows = labs$`Network name (abbrev.)`,
+    left.label.col = unique(cols),
+    bottom.label.col = unique(cols), smooth = T
+  )
+
+  ggsave("../output/temp//temp1.png", p1$plot, width = width, height = height)
+  p1 <- image_read("../output/temp//temp1.png")
+
+  p2 <- plot_matrix(fisherz2r(mean_mat[[ind + 2]]),
+    legend = F, heat.lim = c(-0.7, 0.9),
+    membership.cols = labs$`Network name (abbrev.)`,
+    membership.rows = labs$`Network name (abbrev.)`,
+    left.label.col = unique(cols), bottom.label.col = unique(cols), smooth = T
+  )
+  ggsave("../output/temp//temp2.png", p2$plot, width = width, height = height)
+  p2 <- image_read("../output/temp//temp2.png")
+
+  p3 <- plot_matrix(fisherz2r(mean_mat[[ind + 3]]),
+    legend = F, heat.lim = c(-0.7, 0.9),
+    membership.cols = labs$`Network name (abbrev.)`,
+    membership.rows = labs$`Network name (abbrev.)`,
+    left.label.col = unique(cols),
+    bottom.label.col = unique(cols), smooth = T
+  )
+
+  ggsave("../output/temp//temp3.png", p3$plot, width = width, height = height)
+  p3 <- image_read("../output/temp//temp3.png")
+
+  plot_list[[s]] <- image_append(c(p1, p2, p3), stack = T)
+  ind <- ind + 3
+}
+image_append(c(plot_list[[1]], plot_list[[2]], plot_list[[3]], plot_list[[4]]))
+```
+
+```{r read in FD metrics}
+fd <- raveio::read_mat("../data/brain/movement_regressors_TCP/fd_mm_Jenkinson_MEAN_all_subjs_all_runs.mat")[[1]]
+ordering <- raveio::read_mat("../data/brain/movement_regressors_TCP/runStrs_All.mat")[[1]]
+subj_id_fd <- raveio::read_mat("../data/brain/movement_regressors_TCP/subjIDs_All.mat")[[1]]
+# change ordering to match mri data
+fd <- fd[, c(1, 2, 3, 4, 5, 7, 6)]
+ordering <- ordering[c(1, 2, 3, 4, 5, 7, 6)]
+colnames(fd) <- ordering
+row.names(fd) <- subj_id_fd
+```
+
+```{r compute FD-FC mats}
+# Rest
+rest_minProc_fdfc <- list()
+for (r in 1:4) {
+  rest_array <- abind(rest_minProc[[r]], along = 3)
+  subj_tmp <- names(rest_minProc[[r]])
+  mean_fd <- fd[subj_tmp, r]
+  fd_fc <- array(numeric(), c(434, 434))
+  for (e in 1:434) {
+    for (i in 1:434) {
+      fd_fc[e, i] <- cor(rest_array[e, i, ], mean_fd, use = "pairwise.complete.obs", method = "spearman")
+    }
+  }
+  rest_minProc_fdfc[[r]] <- fd_fc
+  print(r)
+}
+
+
+rest_minProc.fix_fdfc <- list()
+for (r in 1:4) {
+  rest_array <- abind(rest_minProc.fix[[r]], along = 3)
+  subj_tmp <- names(rest_minProc.fix[[r]])
+  fd_fc <- array(numeric(), c(434, 434))
+  mean_fd <- fd[subj_tmp, r]
+  for (e in 1:434) {
+    for (i in 1:434) {
+      fd_fc[e, i] <- cor(rest_array[e, i, ], mean_fd, use = "pairwise.complete.obs", method = "spearman")
+    }
+  }
+  rest_minProc.fix_fdfc[[r]] <- fd_fc
+  print(r)
+}
+
+rest_minProc.fix.gsr_fdfc <- list()
+for (r in 1:4) {
+  rest_array <- abind(rest_minProc.fix.gsr[[r]], along = 3)
+  subj_tmp <- names(rest_minProc.fix.gsr[[r]])
+  fd_fc <- array(numeric(), c(434, 434))
+  mean_fd <- fd[subj_tmp, r]
+  for (e in 1:434) {
+    for (i in 1:434) {
+      fd_fc[e, i] <- cor(rest_array[e, i, ], mean_fd, use = "pairwise.complete.obs", method = "spearman")
+    }
+  }
+  rest_minProc.fix.gsr_fdfc[[r]] <- fd_fc
+  print(r)
+}
+
+
+# task
+task_minProc_fdfc <- list()
+for (r in 1:3) {
+  task_array <- abind(task_minProc[[r]], along = 3)
+  subj_tmp <- names(task_minProc[[r]])
+  fd_fc <- array(numeric(), c(434, 434))
+  mean_fd <- fd[subj_tmp, 4 + r]
+  for (e in 1:434) {
+    for (i in 1:434) {
+      fd_fc[e, i] <- cor(task_array[e, i, ], mean_fd, use = "pairwise.complete.obs", method = "spearman")
+    }
+  }
+  task_minProc_fdfc[[r]] <- fd_fc
+  print(r)
+}
+
+
+task_minProc.fix_fdfc <- list()
+for (r in 1:3) {
+  task_array <- abind(task_minProc.fix[[r]], along = 3)
+  subj_tmp <- names(task_minProc.fix[[r]])
+  fd_fc <- array(numeric(), c(434, 434))
+  mean_fd <- fd[subj_tmp, 4 + r]
+  for (e in 1:434) {
+    for (i in 1:434) {
+      fd_fc[e, i] <- cor(task_array[e, i, ], mean_fd, use = "pairwise.complete.obs", method = "spearman")
+    }
+  }
+  task_minProc.fix_fdfc[[r]] <- fd_fc
+  print(r)
+}
+
+task_minProc.fix.gsr_fdfc <- list()
+for (r in 1:3) {
+  task_array <- abind(task_minProc.fix.gsr[[r]], along = 3)
+  subj_tmp <- names(task_minProc.fix.gsr[[r]])
+  fd_fc <- array(numeric(), c(434, 434))
+  mean_fd <- fd[subj_tmp, 4 + r]
+  for (e in 1:434) {
+    for (i in 1:434) {
+      fd_fc[e, i] <- cor(task_array[e, i, ], mean_fd, use = "pairwise.complete.obs", method = "spearman")
+    }
+  }
+  task_minProc.fix.gsr_fdfc[[r]] <- fd_fc
+  print(r)
+}
+FC_FC_list <- list(
+  rest_minProc_fdfc, rest_minProc.fix_fdfc, rest_minProc.fix.gsr_fdfc,
+  task_minProc_fdfc, task_minProc.fix_fdfc, task_minProc.fix.gsr_fdfc
+)
+
+names(FC_FC_list) <- c(
+  "rest_minProc_fdfc", "rest_minProc.fix_fdfc", "rest_minProc.fix.gsr_fdfc",
+  "task_minProc_fdfc", "task_minProc.fix_fdfc", "task_minProc.fix.gsr_fdfc"
+)
+saveRDS(FC_FC_list, "../output/brain/qc_report/FD_FC_mats_spearman.RDS")
+```
+
+```{r plot FD-FC mats, fig.width=5.6, fig.height=7}
+# matricies
+FC_FC_list <- readRDS("../output/brain/qc_report/FD_FC_mats_spearman.RDS")
+cols <- labs$`Network color code (RGB/255)`
+cols <- stringr::str_split(cols, ",", simplify = T)
+cols <- apply(cols, 2, as.numeric)
+cols <- cols * 100
+cols <- rgb2hex(r = cols[, 1], g = cols[, 2], cols[, 3])
+
+mat_list_minproc <- list()
+mat_list_minproc_fix <- list()
+mat_list_minproc_fix_gsr <- list()
+# rest
+for (p in 1:length(FC_FC_list[[1]])) {
+  mat_list_minproc[[p]] <- as.ggplot(plot_matrix(FC_FC_list[[1]][[p]], heat.lim = c(-.55, .55))$plot)
+  # membership.cols = labs$`Network name (abbrev.)`,
+  # membership.rows =labs$`Network name (abbrev.)` ,
+  # left.label.col = unique(cols),bottom.label.col = unique(cols), smooth = T)
+  mat_list_minproc_fix[[p]] <- as.ggplot(plot_matrix(FC_FC_list[[2]][[p]], heat.lim = c(-.55, .55))$plot)
+  mat_list_minproc_fix_gsr[[p]] <- as.ggplot(plot_matrix(FC_FC_list[[3]][[p]], heat.lim = c(-.55, .55))$plot)
+}
+
+# print means for paper
+for (r in 1:4) {
+  print(mean(FC_FC_list[[1]][[r]][upper.tri(FC_FC_list[[1]][[r]])]))
+}
+for (r in 1:4) {
+  print(mean(FC_FC_list[[2]][[r]][upper.tri(FC_FC_list[[2]][[r]])]))
+}
+for (r in 1:4) {
+  print(mean(FC_FC_list[[3]][[r]][upper.tri(FC_FC_list[[3]][[r]])]))
+}
+
+
+task_mat_list_minproc <- list()
+task_mat_list_minproc_fix <- list()
+task_mat_list_minproc_fix_gsr <- list()
+# task
+for (p in 1:length(FC_FC_list[[4]])) {
+  task_mat_list_minproc[[p]] <- as.ggplot(plot_matrix(FC_FC_list[[4]][[p]], heat.lim = c(-.55, .55))$plot)
+  # membership.cols = labs$`Network name (abbrev.)`,
+  # membership.rows =labs$`Network name (abbrev.)` ,
+  # left.label.col = unique(cols),bottom.label.col = unique(cols), smooth = T)
+  task_mat_list_minproc_fix[[p]] <- as.ggplot(plot_matrix(FC_FC_list[[5]][[p]], heat.lim = c(-.55, .55))$plot)
+  task_mat_list_minproc_fix_gsr[[p]] <- as.ggplot(plot_matrix(FC_FC_list[[6]][[p]], heat.lim = c(-.55, .55))$plot)
+}
+
+# print means for paper
+for (r in 1:3) {
+  print(mean(FC_FC_list[[4]][[r]][upper.tri(FC_FC_list[[1]][[r]])]))
+}
+for (r in 1:3) {
+  print(mean(FC_FC_list[[5]][[r]][upper.tri(FC_FC_list[[2]][[r]])]))
+}
+for (r in 1:3) {
+  print(mean(FC_FC_list[[6]][[r]][upper.tri(FC_FC_list[[3]][[r]])]))
+}
+
+
+# rest
+rest_minProc_mat <- mat_list_minproc[[1]] | mat_list_minproc[[2]] | mat_list_minproc[[3]] | mat_list_minproc[[4]]
+rest_minProc.fix_mat <- mat_list_minproc_fix[[1]] | mat_list_minproc_fix[[2]] | mat_list_minproc_fix[[3]] | mat_list_minproc_fix[[4]]
+rest_minProc.fix.gsr_mat <- mat_list_minproc_fix_gsr[[1]] | mat_list_minproc_fix_gsr[[2]] | mat_list_minproc_fix_gsr[[3]] | mat_list_minproc_fix_gsr[[4]]
+
+#save vector files
+
+#rest
+ggsave(filename = "../output/brain/qc_report/fdfc_rest_minProc_matrix_spearman.svg", plot = rest_minProc_mat, height = 7, width = 22)
+ggsave(filename = "../output/brain/qc_report/fdfc_rest_minProc.fix_matrix_spearman.svg", plot = rest_minProc.fix_mat, height = 7, width = 22)
+ggsave(filename = "../output/brain/qc_report/fdfc_rest_minProc.fix.gsr_matrix_spearman.svg", plot = rest_minProc.fix.gsr_mat, height = 7, width = 22)
+
+# task
+task_minProc_mat <- task_mat_list_minproc[[1]] | task_mat_list_minproc[[2]] | task_mat_list_minproc[[3]]
+task_minProc.fix_mat <- task_mat_list_minproc_fix[[1]] | task_mat_list_minproc_fix[[2]] | task_mat_list_minproc_fix[[3]]
+task_minProc.fix.gsr_mat <- task_mat_list_minproc_fix_gsr[[1]] | task_mat_list_minproc_fix_gsr[[2]] | task_mat_list_minproc_fix_gsr[[3]]
+ggsave(filename = "../output/brain/qc_report/fdfc_task_minProc_matrix_spearman.svg", plot = task_minProc_mat, height = 7, width = 16.5)
+ggsave(filename = "../output/brain/qc_report/fdfc_task_minProc.fix_matrix_spearman.svg", plot = task_minProc.fix_mat, height = 7, width = 16.5)
+ggsave(filename = "../output/brain/qc_report/fdfc_task_minProc.fix.gsr_matrix_spearman.svg", plot = task_minProc.fix.gsr_mat, height = 7, width = 16.5)
+```
+
+
+```{r plot FD-FC (mats upper tri only), fig.width=5.6, fig.height=7}
+# matricies
+FC_FC_list <- readRDS("../output/brain/qc_report/FD_FC_mats_spearman.RDS")
+cols <- labs$`Network color code (RGB/255)`
+cols <- stringr::str_split(cols, ",", simplify = T)
+cols <- apply(cols, 2, as.numeric)
+cols <- cols * 100
+cols <- rgb2hex(r = cols[, 1], g = cols[, 2], cols[, 3])
+
+mat_list_minproc <- list()
+mat_list_minproc_fix <- list()
+mat_list_minproc_fix_gsr <- list()
+
+# rest
+for (p in 1:length(FC_FC_list[[1]])) {
+  temp <- FC_FC_list[[1]][[p]]
+  temp[upper.tri(temp)] <- NA
+  mat_list_minproc[[p]] <- as.ggplot(plot_matrix(temp, heat.lim = c(-.55, .55))$plot)
+  temp <- FC_FC_list[[2]][[p]]
+  temp[upper.tri(temp)] <- NA
+  mat_list_minproc_fix[[p]] <- as.ggplot(plot_matrix(temp, heat.lim = c(-.55, .55))$plot)
+  temp <- FC_FC_list[[3]][[p]]
+  temp[upper.tri(temp)] <- NA
+  mat_list_minproc_fix_gsr[[p]] <- as.ggplot(plot_matrix(temp, heat.lim = c(-.55, .55))$plot)
+}
+task_mat_list_minproc <- list()
+task_mat_list_minproc_fix <- list()
+task_mat_list_minproc_fix_gsr <- list()
+# task
+for (p in 1:length(FC_FC_list[[4]])) {
+  temp <- FC_FC_list[[4]][[p]]
+  temp[upper.tri(temp)] <- NA
+  task_mat_list_minproc[[p]] <- as.ggplot(plot_matrix(temp, heat.lim = c(-.55, .55))$plot)
+  temp <- FC_FC_list[[5]][[p]]
+  temp[upper.tri(temp)] <- NA
+  task_mat_list_minproc_fix[[p]] <- as.ggplot(plot_matrix(temp, heat.lim = c(-.55, .55))$plot)
+  temp <- FC_FC_list[[6]][[p]]
+  temp[upper.tri(temp)] <- NA
+  task_mat_list_minproc_fix_gsr[[p]] <- as.ggplot(plot_matrix(temp, heat.lim = c(-.55, .55))$plot)
+}
+
+# rest
+rest_minProc_mat <- mat_list_minproc[[1]] | mat_list_minproc[[2]] | mat_list_minproc[[3]] | mat_list_minproc[[4]]
+rest_minProc.fix_mat <- mat_list_minproc_fix[[1]] | mat_list_minproc_fix[[2]] | mat_list_minproc_fix[[3]] | mat_list_minproc_fix[[4]]
+rest_minProc.fix.gsr_mat <- mat_list_minproc_fix_gsr[[1]] | mat_list_minproc_fix_gsr[[2]] | mat_list_minproc_fix_gsr[[3]] | mat_list_minproc_fix_gsr[[4]]
+ggsave(filename = "../output/brain/qc_report/fdfc_rest_minProc_matrix_ut_spearman.svg", plot = rest_minProc_mat, height = 7, width = 22)
+ggsave(filename = "../output/brain/qc_report/fdfc_rest_minProc.fix_matrix_ut_spearman.svg", plot = rest_minProc.fix_mat, height = 7, width = 22)
+ggsave(filename = "../output/brain/qc_report/fdfc_rest_minProc.fix.gsr_matrix_ut_spearman.svg", plot = rest_minProc.fix.gsr_mat, height = 7, width = 22)
+
+# task
+task_minProc_mat <- task_mat_list_minproc[[1]] | task_mat_list_minproc[[2]] | task_mat_list_minproc[[3]]
+task_minProc.fix_mat <- task_mat_list_minproc_fix[[1]] | task_mat_list_minproc_fix[[2]] | task_mat_list_minproc_fix[[3]]
+task_minProc.fix.gsr_mat <- task_mat_list_minproc_fix_gsr[[1]] | task_mat_list_minproc_fix_gsr[[2]] | task_mat_list_minproc_fix_gsr[[3]]
+ggsave(filename = "../output/brain/qc_report/fdfc_task_minProc_matrix_ut_spearman.svg", plot = task_minProc_mat, height = 7, width = 16.5)
+ggsave(filename = "../output/brain/qc_report/fdfc_task_minProc.fix_matrix_ut_spearman.svg", plot = task_minProc.fix_mat, height = 7, width = 16.5)
+ggsave(filename = "../output/brain/qc_report/fdfc_task_minProc.fix.gsr_matrix_ut_spearman.svg", plot = task_minProc.fix.gsr_mat, height = 7, width = 16.5)
+```
+
+```{r plot FD-FC as box plots}
+plot_horizontal_boxplots <- function(data_frame) {
+  library(ggeasy)
+  # Melt the data frame to long format
+  melted_data <- melt(data_frame)
+  melted_data$variable <- factor(melted_data$variable, levels = rev(unique(melted_data$variable)))
+
+  # Create a ggplot object with horizontal boxplots for each column
+  p <- ggplot(melted_data, aes(x = variable, y = value, fill = variable)) +
+    geom_hline(yintercept = 0, color = "black", size = 1) +
+    geom_violin(draw_quantiles = c(0.25, 0.75), linetype = "dotted") +
+    geom_violin(fill = "transparent", draw_quantiles = 0.5, show.legend = F) +
+    coord_flip() +
+    scale_y_continuous(breaks = c(-0.55, -0.35, -0.15, 0, 0.15, 0.35, 0.55), limits = c(-0.6, 0.6)) +
+    scale_x_discrete() +
+    theme_classic() +
+    scale_fill_carto_d(palette = "Safe") +
+    ylab("FD-FC") +
+    xlab("") +
+    easy_remove_y_axis() +
+    easy_remove_legend()
+
+  # Print the plot
+  print(p)
+}
+
+rest1_fdfc_vec <- as.data.frame(matrix(NA, nrow = 93961, ncol = 3))
+colnames(rest1_fdfc_vec) <- c("minProc", "minProc+FIX", "minProc+FIX+GSR")
+for (p in 1:3) {
+  rest1_fdfc_vec[, p] <- FC_FC_list[[p]][[1]][upper.tri(FC_FC_list[[p]][[1]])]
+}
+rest1_fdfc_bp <- plot_horizontal_boxplots(rest1_fdfc_vec)
+
+rest2_fdfc_vec <- as.data.frame(matrix(NA, nrow = 93961, ncol = 3))
+colnames(rest2_fdfc_vec) <- c("minProc", "minProc+FIX", "minProc+FIX+GSR")
+for (p in 1:3) {
+  rest2_fdfc_vec[, p] <- FC_FC_list[[p]][[2]][upper.tri(FC_FC_list[[p]][[2]])]
+}
+rest2_fdfc_bp <- plot_horizontal_boxplots(rest2_fdfc_vec)
+
+rest3_fdfc_vec <- as.data.frame(matrix(NA, nrow = 93961, ncol = 3))
+colnames(rest3_fdfc_vec) <- c("minProc", "minProc+FIX", "minProc+FIX+GSR")
+for (p in 1:3) {
+  rest3_fdfc_vec[, p] <- FC_FC_list[[p]][[3]][upper.tri(FC_FC_list[[p]][[3]])]
+}
+rest3_fdfc_bp <- plot_horizontal_boxplots(rest3_fdfc_vec)
+
+rest4_fdfc_vec <- as.data.frame(matrix(NA, nrow = 93961, ncol = 3))
+colnames(rest4_fdfc_vec) <- c("minProc", "minProc+FIX", "minProc+FIX+GSR")
+for (p in 1:3) {
+  rest4_fdfc_vec[, p] <- FC_FC_list[[p]][[4]][upper.tri(FC_FC_list[[p]][[4]])]
+}
+rest4_fdfc_bp <- plot_horizontal_boxplots(rest4_fdfc_vec)
+
+
+task1_fdfc_vec <- as.data.frame(matrix(NA, nrow = 93961, ncol = 3))
+colnames(task1_fdfc_vec) <- c("minProc", "minProc+FIX", "minProc+FIX+GSR")
+for (p in 1:3) {
+  task1_fdfc_vec[, p] <- FC_FC_list[[p + 3]][[1]][upper.tri(FC_FC_list[[p + 3]][[1]])]
+}
+task1_fdfc_bp <- plot_horizontal_boxplots(task1_fdfc_vec)
+
+task2_fdfc_vec <- as.data.frame(matrix(NA, nrow = 93961, ncol = 3))
+colnames(task2_fdfc_vec) <- c("minProc", "minProc+FIX", "minProc+FIX+GSR")
+for (p in 1:3) {
+  task2_fdfc_vec[, p] <- FC_FC_list[[p + 3]][[2]][upper.tri(FC_FC_list[[p + 3]][[2]])]
+}
+task2_fdfc_bp <- plot_horizontal_boxplots(task2_fdfc_vec)
+
+
+task3_fdfc_vec <- as.data.frame(matrix(NA, nrow = 93961, ncol = 3))
+colnames(task3_fdfc_vec) <- c("minProc", "minProc+FIX", "minProc+FIX+GSR")
+for (p in 1:3) {
+  task3_fdfc_vec[, p] <- FC_FC_list[[p + 3]][[3]][upper.tri(FC_FC_list[[p + 3]][[3]])]
+}
+task3_fdfc_bp <- plot_horizontal_boxplots(task3_fdfc_vec)
+
+rest_fdfc_bp <- rest1_fdfc_bp | rest2_fdfc_bp | rest3_fdfc_bp | rest4_fdfc_bp
+ggsave(plot = rest_fdfc_bp, filename = "../output/brain/qc_report/rest_fdfc_vp_spearman.svg", width = 12, height = 2)
+
+task_fdfc_bp <- task1_fdfc_bp | task2_fdfc_bp | task3_fdfc_bp
+ggsave(plot = task_fdfc_bp, filename = "../output/brain/qc_report/task_fdfc_vp_spearman.svg", width = 8, height = 2)
+
+# ggsave(plot = rest2_fdfc_bp, filename = "../output/brain/qc_report/fdfc_rest2_vp_spearman.svg", width = 6, height = 2)
+# ggsave(plot = rest3_fdfc_bp, filename = "../output/brain/qc_report/fdfc_rest3_vp_spearman.svg", width = 6, height = 2)
+# ggsave(plot = rest4_fdfc_bp, filename = "../output/brain/qc_report/fdfc_rest4_vp_spearman.svg", width = 6, height = 2)
+# ggsave(plot = task1_fdfc_bp, filename = "../output/brain/qc_report/fdfc_task1_vp_spearman.svg", width = 6, height = 2)
+# ggsave(plot = task2_fdfc_bp, filename = "../output/brain/qc_report/fdfc_task2_vp_spearman.svg", width = 6, height = 2)
+# ggsave(plot = task3_fdfc_bp, filename = "../output/brain/qc_report/fdfc_task3_vp_spearman.svg", width = 6, height = 2)
+```
+
+```{r plot FD-FC boxplot, all scans and processing steps in one plot}
+rest1_fdfc_vec_melt <- melt(rest1_fdfc_vec)
+rest1_fdfc_vec_melt$scan <- "Rest AP 1"
+rest2_fdfc_vec_melt <- melt(rest2_fdfc_vec)
+rest2_fdfc_vec_melt$scan <- "Rest AP 2"
+rest3_fdfc_vec_melt <- melt(rest3_fdfc_vec)
+rest3_fdfc_vec_melt$scan <- "Rest PA 1"
+rest4_fdfc_vec_melt <- melt(rest4_fdfc_vec)
+rest4_fdfc_vec_melt$scan <- "Rest PA 2"
+
+task1_fdfc_vec_melt <- melt(task1_fdfc_vec)
+task1_fdfc_vec_melt$scan <- "Task Stroop AP"
+task2_fdfc_vec_melt <- melt(task2_fdfc_vec)
+task2_fdfc_vec_melt$scan <- "Task Stroop PA"
+task3_fdfc_vec_melt <- melt(task3_fdfc_vec)
+task3_fdfc_vec_melt$scan <- "Task Hammer AP"
+
+data_frames_list <- list(
+  rest1_fdfc_vec_melt,
+  rest2_fdfc_vec_melt,
+  rest3_fdfc_vec_melt,
+  rest4_fdfc_vec_melt,
+  task1_fdfc_vec_melt,
+  task2_fdfc_vec_melt,
+  task3_fdfc_vec_melt
+)
+
+# Combine (merge) all data frames into one using rbind
+merged_data_frame <- do.call(rbind, data_frames_list)
+
+p <- ggplot(merged_data_frame, aes(x = variable, y = value, fill = scan)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 0, linetype = "dotted", color = "red") +
+  theme_classic() +
+  scale_fill_carto_d(palette = "Safe") +
+  labs(x = "", y = "FD-FC", fill = "Scan") +
+  theme(text = element_text(size = 14)) # Adjust text size here
+
+# Print the plot
+print(p)
+ggsave(plot = p, filename = "../output/brain/qc_report/fdfc_all_bp_spearman.svg", width = 10, height = 4)
+```
+
+```{r compute FD-FC p-values, eval=FALSE}
+# Rest
+rest_minProc_fdfc <- list()
+for (r in 1:4) {
+  rest_array <- abind(rest_minProc[[r]], along = 3)
+  subj_tmp <- names(rest_minProc[[r]])
+  mean_fd <- fd[subj_tmp, r]
+  fd_fc <- array(numeric(), c(434, 434))
+  for (e in 1:434) {
+    for (i in 1:434) {
+      fd_fc[e, i] <- cor.test(rest_array[e, i, ], mean_fd, use = "pairwise.complete.obs", method = "spearman", exact = F)$p.value
+    }
+  }
+  rest_minProc_fdfc[[r]] <- fd_fc
+  print(r)
+}
+
+
+rest_minProc.fix_fdfc <- list()
+for (r in 1:4) {
+  rest_array <- abind(rest_minProc.fix[[r]], along = 3)
+  subj_tmp <- names(rest_minProc.fix[[r]])
+  fd_fc <- array(numeric(), c(434, 434))
+  mean_fd <- fd[subj_tmp, r]
+  for (e in 1:434) {
+    for (i in 1:434) {
+      fd_fc[e, i] <- cor.test(rest_array[e, i, ], mean_fd, use = "pairwise.complete.obs", method = "spearman", exact = F)$p.value
+    }
+  }
+  rest_minProc.fix_fdfc[[r]] <- fd_fc
+  print(r)
+}
+
+rest_minProc.fix.gsr_fdfc <- list()
+for (r in 1:4) {
+  rest_array <- abind(rest_minProc.fix.gsr[[r]], along = 3)
+  subj_tmp <- names(rest_minProc.fix.gsr[[r]])
+  fd_fc <- array(numeric(), c(434, 434))
+  mean_fd <- fd[subj_tmp, r]
+  for (e in 1:434) {
+    for (i in 1:434) {
+      fd_fc[e, i] <- cor.test(rest_array[e, i, ], mean_fd, use = "pairwise.complete.obs", method = "spearman", exact = F)$p.value
+    }
+  }
+  rest_minProc.fix.gsr_fdfc[[r]] <- fd_fc
+  print(r)
+}
+
+
+
+
+# task
+task_minProc_fdfc <- list()
+for (r in 1:3) {
+  task_array <- abind(task_minProc[[r]], along = 3)
+  subj_tmp <- names(task_minProc[[r]])
+  fd_fc <- array(numeric(), c(434, 434))
+  mean_fd <- fd[subj_tmp, 4 + r]
+  for (e in 1:434) {
+    for (i in 1:434) {
+      fd_fc[e, i] <- cor.test(task_array[e, i, ], mean_fd, use = "pairwise.complete.obs", method = "spearman", exact = F)$p.value
+    }
+  }
+  task_minProc_fdfc[[r]] <- fd_fc
+  print(r)
+}
+
+
+task_minProc.fix_fdfc <- list()
+for (r in 1:3) {
+  task_array <- abind(task_minProc.fix[[r]], along = 3)
+  subj_tmp <- names(task_minProc.fix[[r]])
+  fd_fc <- array(numeric(), c(434, 434))
+  mean_fd <- fd[subj_tmp, 4 + r]
+  for (e in 1:434) {
+    for (i in 1:434) {
+      fd_fc[e, i] <- cor.test(task_array[e, i, ], mean_fd, use = "pairwise.complete.obs", method = "spearman", exact = F)$p.value
+    }
+  }
+  task_minProc.fix_fdfc[[r]] <- fd_fc
+  print(r)
+}
+
+task_minProc.fix.gsr_fdfc <- list()
+for (r in 1:3) {
+  task_array <- abind(task_minProc.fix.gsr[[r]], along = 3)
+  subj_tmp <- names(task_minProc.fix.gsr[[r]])
+  fd_fc <- array(numeric(), c(434, 434))
+  mean_fd <- fd[subj_tmp, 4 + r]
+  for (e in 1:434) {
+    for (i in 1:434) {
+      fd_fc[e, i] <- cor.test(task_array[e, i, ], mean_fd, use = "pairwise.complete.obs", method = "spearman", exact = F)$p.value
+    }
+  }
+  task_minProc.fix.gsr_fdfc[[r]] <- fd_fc
+  print(r)
+}
+
+FD_FC_list_pvals_spearman <- list(
+  rest_minProc_fdfc, rest_minProc.fix_fdfc, rest_minProc.fix.gsr_fdfc,
+  task_minProc_fdfc, task_minProc.fix_fdfc, task_minProc.fix.gsr_fdfc
+)
+
+names(FD_FC_list_pvals_spearman) <- c(
+  "rest_minProc_fdfc", "rest_minProc.fix_fdfc", "rest_minProc.fix.gsr_fdfc",
+  "task_minProc_fdfc", "task_minProc.fix_fdfc", "task_minProc.fix.gsr_fdfc"
+)
+saveRDS(FD_FC_list_pvals_spearman, "../output/brain/qc_report/FD_FC_mats_pvals_spearman.RDS")
+```
+
+
+```{r Compute % of sig. FD-FC edges}
+FD_FC_list_pvals <- readRDS("../output/brain/qc_report/FD_FC_mats_pvals_spearman.RDS")
+
+edge_pct_uncor <- as.data.frame(matrix(NA, 21, 3))
+edge_pct_cor <- as.data.frame(matrix(NA, 21, 3))
+
+
+ind <- 1
+for (p in 1:length(FD_FC_list_pvals)) {
+  for (s in 1:length(FD_FC_list_pvals[[p]])) {
+    temp_mat <- FD_FC_list_pvals[[p]][[s]]
+    temp_mat <- temp_mat[upper.tri(temp_mat)]
+    edge_pct_uncor[ind, 1] <- (sum(temp_mat < 0.05) / length(temp_mat)) * 100
+    edge_pct_cor[ind, 1] <- (sum(p.adjust(temp_mat, method = "fdr") < 0.05) / length(p.adjust(temp_mat, method = "fdr"))) * 100
+    ind <- ind + 1
+  }
+}
+edge_pct_uncor[, 2] <- edge_pct_cor[, 2] <- c(rep(c("Rest AP 1", "Rest AP 2", "Rest PA 1", "Rest PA 2"), 3), rep(c("Task Stroop AP", "Task Stroop PA", "Task Hammer AP"), 3))
+edge_pct_uncor[, 3] <- edge_pct_cor[, 3] <- c(rep("minProc", 4), rep("minProc+FIX", 4), rep("minProc+FIX+GSR", 4), rep("minProc", 3), rep("minProc+FIX", 3), rep("minProc+FIX+GSR", 3))
+colnames(edge_pct_uncor) <- colnames(edge_pct_cor) <- c("%sig", "Scan", "Stage")
+edge_pct_uncor$Stage <- factor(edge_pct_uncor$Stage, levels = unique(edge_pct_uncor$Stage))
+edge_pct_cor$Stage <- factor(edge_pct_cor$Stage, levels = unique(edge_pct_cor$Stage))
+
+edge_pct_cor$`%sig`[edge_pct_cor$`%sig` < 1] <- 1 # add so plot line is visible
+
+plot_sig_by_scan_dual <- function(data1, data2, input_var) {
+  # Subset the data based on the input variable for both data frames
+  subset_data1 <- data1[data1$Scan == input_var, ]
+  subset_data2 <- data2[data2$Scan == input_var, ]
+
+  # Create a bar plot using ggplot for the first data frame
+  plot <- ggplot(subset_data1, aes(x = Stage, y = `%sig`)) +
+    geom_bar(stat = "identity") +
+    geom_bar(data = subset_data2, aes(x = Stage, y = `%sig`), stat = "identity", fill = "lightblue", width = 0.8) +
+    labs(
+      x = "",
+      y = ""
+    ) +
+    ylim(c(0, 70)) +
+    scale_x_discrete() +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 22)) +
+    easy_remove_axes(what = c("title", "text", "ticks"), which = "x")
+
+  return(plot)
+}
+
+rest1_sig_fd_bp <- plot_sig_by_scan_dual(data1 = edge_pct_uncor, data2 = edge_pct_cor, input_var = "Rest AP 1")
+rest2_sig_fd_bp <- plot_sig_by_scan_dual(data1 = edge_pct_uncor, data2 = edge_pct_cor, input_var = "Rest AP 2")
+rest3_sig_fd_bp <- plot_sig_by_scan_dual(data1 = edge_pct_uncor, data2 = edge_pct_cor, input_var = "Rest PA 1")
+rest4_sig_fd_bp <- plot_sig_by_scan_dual(data1 = edge_pct_uncor, data2 = edge_pct_cor, input_var = "Rest PA 2")
+
+task1_sig_fd_bp <- plot_sig_by_scan_dual(data1 = edge_pct_uncor, data2 = edge_pct_cor, input_var = "Task Stroop AP")
+task2_sig_fd_bp <- plot_sig_by_scan_dual(data1 = edge_pct_uncor, data2 = edge_pct_cor, input_var = "Task Stroop PA")
+task3_sig_fd_bp <- plot_sig_by_scan_dual(data1 = edge_pct_uncor, data2 = edge_pct_cor, input_var = "Task Hammer AP")
+
+rest_sig_fd_bp <- rest1_sig_fd_bp | rest2_sig_fd_bp | rest3_sig_fd_bp | rest4_sig_fd_bp
+task_sig_fd_bp <- task1_sig_fd_bp | task2_sig_fd_bp | task3_sig_fd_bp
+
+ggsave(plot = rest_sig_fd_bp, filename = "../output/brain/qc_report/fdfc_sig_rest_bp_spearman.svg", width = 12, height = 3)
+ggsave(plot = task_sig_fd_bp, filename = "../output/brain/qc_report/fdfc_sig_task_bp_spearman.svg", width = 9, height = 3)
+
+
+# Full plot
+plot <- ggplot(edge_pct_cor, aes(x = Stage, y = `%sig`)) +
+  geom_bar(aes(fill = Scan), stat = "identity", position = "dodge", color = "black") +
+  labs(
+    x = "",
+    y = "Edges sig. correlated with FC (%)"
+  ) +
+  ylim(c(0, 65)) +
+  scale_x_discrete() +
+  scale_fill_carto_d(palette = "Safe") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 22),
+    axis.text.y = element_text(size = 22),
+    axis.title.y = element_text(size = 22)
+  )
+
+ggsave(plot = plot, filename = "../output/brain/qc_report/fdfcsig_all_bp_spearman_fdr.svg", width = 20, height = 8)
+
+plot <- ggplot(edge_pct_uncor, aes(x = Stage, y = `%sig`)) +
+  geom_bar(aes(fill = Scan), stat = "identity", position = "dodge", color = "black") +
+  labs(
+    x = "",
+    y = "Edges sig. correlated with FC (%)"
+  ) +
+  ylim(c(0, 65)) +
+  scale_x_discrete() +
+  scale_fill_carto_d(palette = "Safe") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 22),
+    axis.text.y = element_text(size = 22),
+    axis.title.y = element_text(size = 22)
+  )
+
+ggsave(plot = plot, filename = "../output/brain/qc_report/fdfcsig_all_bp_spearman_uncor.svg", width = 20, height = 8)
+```
+
+```{r FD-FC-distance plots}
+library(colorspace)
+FD_FC_list <- readRDS("../output/brain/qc_report/FD_FC_mats_spearman.RDS")
+
+xyz <- data.frame("x" = labs$r, "y" = labs$a, "z" = labs$s)
+xyz.dist <- dist.xyz(as.matrix(xyz), )
+# plot_matrix(xyz.dist2, heat.lim = c(0,200), colour.pal = pals::brewer.blues(1000))
+distance <- xyz.dist[upper.tri(xyz.dist)]
+
+rest.fdfc.plot.list <- list()
+for (r in 1:4) {
+  fc_fd_minProc <- FC_FC_list[[1]][[r]]
+  fc_fd_minProc.fix <- FC_FC_list[[2]][[r]]
+  fc_fd_minProc.fix.gsr <- FC_FC_list[[3]][[r]]
+
+  fc_fd_minProc <- fc_fd_minProc[upper.tri(fc_fd_minProc)]
+  fc_fd_minProc.fix <- fc_fd_minProc.fix[upper.tri(fc_fd_minProc.fix)]
+  fc_fd_minProc.fix.gsr <- fc_fd_minProc.fix.gsr[upper.tri(fc_fd_minProc.fix.gsr)]
+
+  xy <- data.frame("distance" = distance, "fc_fd_minProc" = fc_fd_minProc, "fc_fd_minProc.fix" = fc_fd_minProc.fix, "fc_fd_minProc.fix.gsr" = fc_fd_minProc.fix.gsr)
+
+
+  rest.fdfc.plot.list[[r]] <- ggplot(xy, aes(x = distance)) +
+    stat_density_2d(
+      geom = "polygon", contour = TRUE,
+      aes(y = fc_fd_minProc, alpha = 0.1), fill = "#888888", colour = "black",
+      bins = 2, show.legend = F, contour_var = "ndensity", size = 0.4, adjust = 1.2
+    ) +
+    stat_summary_bin(
+      mapping = aes(y = fc_fd_minProc), fun = mean, bins = 15,
+      color = "#888888", size = 0.2
+    ) +
+    stat_density_2d(
+      geom = "polygon", contour = TRUE,
+      aes(y = fc_fd_minProc.fix, alpha = 0.1), fill = "#CC6677", colour = "black",
+      bins = 2, show.legend = F, contour_var = "ndensity", size = 0.4, adjust = 1.2
+    ) +
+    stat_summary_bin(
+      mapping = aes(y = fc_fd_minProc.fix), fun = mean, bins = 15,
+      color = "#CC6677", size = 0.2
+    ) +
+    stat_density_2d(
+      geom = "polygon", contour = TRUE,
+      aes(y = fc_fd_minProc.fix.gsr, alpha = 0.1), fill = "#88CCEE", colour = "black",
+      bins = 2, show.legend = F, contour_var = "ndensity", size = 0.4, adjust = 1.2
+    ) +
+    stat_summary_bin(
+      mapping = aes(y = fc_fd_minProc.fix.gsr), fun = mean, bins = 15,
+      color = "#88CCEE", size = 0.2
+    ) +
+    ylim(-0.25, 0.5) +
+    geom_hline(yintercept = 0, color = "black") +
+    theme_classic() +
+    ylab(" ") +
+    xlab(" ")
+}
+
+
+rest_fd_fc_dist <- (rest.fdfc.plot.list[[1]] | rest.fdfc.plot.list[[2]] | rest.fdfc.plot.list[[3]] | rest.fdfc.plot.list[[4]])
+
+task.fdfc.plot.list <- list()
+for (r in 1:3) {
+  fc_fd_minProc <- FC_FC_list[[4]][[r]]
+  fc_fd_minProc.fix <- FC_FC_list[[5]][[r]]
+  fc_fd_minProc.fix.gsr <- FC_FC_list[[6]][[r]]
+
+  fc_fd_minProc <- fc_fd_minProc[upper.tri(fc_fd_minProc)]
+  fc_fd_minProc.fix <- fc_fd_minProc.fix[upper.tri(fc_fd_minProc.fix)]
+  fc_fd_minProc.fix.gsr <- fc_fd_minProc.fix.gsr[upper.tri(fc_fd_minProc.fix.gsr)]
+
+  xy <- data.frame("distance" = distance, "fc_fd_minProc" = fc_fd_minProc, "fc_fd_minProc.fix" = fc_fd_minProc.fix, "fc_fd_minProc.fix.gsr" = fc_fd_minProc.fix.gsr)
+
+
+  task.fdfc.plot.list[[r]] <- ggplot(xy, aes(x = distance)) +
+    stat_density_2d(
+      geom = "polygon", contour = TRUE,
+      aes(y = fc_fd_minProc, alpha = 0.1), fill = "#888888", colour = "black",
+      bins = 2, show.legend = F, contour_var = "ndensity", size = 0.4, adjust = 1.2
+    ) +
+    stat_summary_bin(
+      mapping = aes(y = fc_fd_minProc), fun = mean, bins = 15,
+      color = "#888888", size = 0.2
+    ) +
+    stat_density_2d(
+      geom = "polygon", contour = TRUE,
+      aes(y = fc_fd_minProc.fix, alpha = 0.1), fill = "#CC6677", colour = "black",
+      bins = 2, show.legend = F, contour_var = "ndensity", size = 0.4, adjust = 1.2
+    ) +
+    stat_summary_bin(
+      mapping = aes(y = fc_fd_minProc.fix), fun = mean, bins = 15,
+      color = "#CC6677", size = 0.2
+    ) +
+    stat_density_2d(
+      geom = "polygon", contour = TRUE,
+      aes(y = fc_fd_minProc.fix.gsr, alpha = 0.1), fill = "#88CCEE", colour = "black",
+      bins = 2, show.legend = F, contour_var = "ndensity", size = 0.4, adjust = 1.2
+    ) +
+    stat_summary_bin(
+      mapping = aes(y = fc_fd_minProc.fix.gsr), fun = mean, bins = 15,
+      color = "#88CCEE", size = 0.2
+    ) +
+    ylim(-0.25, 0.5) +
+    geom_hline(yintercept = 0, color = "black") +
+    theme_classic() +
+    ylab(" ") +
+    xlab(" ")
+}
+
+
+task_fd_fc_dist <- (task.fdfc.plot.list[[1]] | task.fdfc.plot.list[[2]] | task.fdfc.plot.list[[3]])
+
+ggsave(plot = rest_fd_fc_dist, filename = "../output/brain/qc_report/rest_fdfc_dist.svg", width = 14, height = 3)
+ggsave(plot = task_fd_fc_dist, filename = "../output/brain/qc_report/task_fdfc_dist.svg", width = 10.5, height = 3)
+
+# Altenate plot 
+# ggplot(xy, aes(x=distance)) +
+#    #stat_density_2d(geom = "polygon", contour = TRUE,
+#    #              aes(fill = after_stat(level), y=fc_fd_minProc, alpha=after_stat(level)), colour = "grey",fill = lighten("#888888", amount = 0.5),
+#    #              bins = 3, show.legend = F) +
+#    #stat_density_2d(geom = "polygon", contour = TRUE,
+#    #              aes(fill = after_stat(level), y=fc_fd_minProc.fix, alpha=after_stat(level)), colour = "grey",fill = lighten("#CC6677", amount = 0.5),
+#    #              bins = 3, show.legend = F)+
+#  #stat_density_2d(geom = "polygon", contour = TRUE,
+#  #                aes(fill = after_stat(level), y=fc_fd_minProc.fix.gsr, alpha=after_stat(level)), colour = "grey",fill = lighten("#88CCEE", amount = 0.5),
+#  #                bins = 3, show.legend = F)+
+#  #  ggtitle("fix_gsr") +
+#    stat_summary_bin(mapping = aes(y=fc_fd_minProc), fun.data = mean_sdl, bins=10,
+#                   color='#888888', size=0.5,position = position_nudge(x = -5)) +
+#  stat_summary_bin(mapping = aes(y=fc_fd_minProc.fix), fun.data = mean_sdl, bins=10,
+#                   color='#CC6677', size=0.5, position =  position_nudge(x=0)) +
+#    stat_summary_bin(mapping = aes(y=fc_fd_minProc.fix.gsr), fun.data = mean_sdl, bins=10,
+#                   color='#88CCEE', size=0.5, position = position_nudge(x= 5)) +
+#  #stat_summary_bin(fun.data = mean_sdl, bins=20,
+#  #                 color='orange', size=0.5) +
+#  ylim(-0.25,0.5) +
+#  geom_hline(yintercept = 0) +
+#  theme_classic() + ylab(" ") + xlab(" ")
+```
+
+```{r plot sig fd-fc edges on brain - unused}
+library(brainconn)
+
+custom_atlas <- custom_atlas_example
+atlas <- data.frame("ROI.Name" = labs$`Region name (abbrev.)`, "x.mni" = labs$r, "y.mni" = labs$a, "z.mni" = labs$s, "network" = labs$`Network name (abbrev.)`)
+atlas[, 2:4] <- apply(atlas[, 2:4], 2, as.integer)
+FD_FC_list_pvals <- readRDS("../output/brain/qc_report/FD_FC_mats_pvals_spearman.RDS")
+ind <- 1
+plot_list <- list()
+for (p in 1:length(FD_FC_list_pvals)) {
+  for (s in 1:length(FD_FC_list_pvals[[p]])) {
+    temp_mat <- FD_FC_list_pvals[[p]][[s]]
+    temp_mat_05 <- ifelse(temp_mat < 0.05, -log10(temp_mat), 0)
+    temp_mat_fdr <- p.adjust(temp_mat[upper.tri(temp_mat)], method = "fdr")
+    temp_mat_fdr <- vec_2_mat(temp_mat_fdr, 434, diag = 0)
+    temp_mat_fdr_05 <- ifelse(temp_mat_fdr < 0.0001, -log10(temp_mat_fdr), 0)
+    plot_list[[ind]] <- print(brainconn(atlas,
+      conmat = temp_mat_fdr_05,
+      all.nodes = F,
+      node.color = "#89CFF0",
+      view = "top",
+      node.size = 1,
+      edge.width = 0.1,
+      edge.color.weighted = T,
+      background.alpha = 0.3,
+      edge.alpha = 0.8
+    ))
+    ind <- ind + 1
+    print(ind)
+  }
+}
+# check_atlas(atlas)
+mat <- matrix(0, 434, 434)
+
+brainconn(atlas,
+  conmat = mat,
+  all.nodes = T,
+  node.color = "network",
+  view = "ortho",
+  node.size = 2,
+  background.alpha = 0.3,
+  labels = F
+) + ggraph::scale_fill_viridis()
+```
+
+```{r subject to subject homogeniety minProc.fix.gsr unused}
+combined_lists <- list()
+cormat1 <- matrix(nrow = 93961, ncol = length(rest_minProc.fix.gsr[[1]]))
+cormat2 <- matrix(nrow = 93961, ncol = length(rest_minProc.fix.gsr[[2]]))
+cormat3 <- matrix(nrow = 93961, ncol = length(rest_minProc.fix.gsr[[3]]))
+cormat4 <- matrix(nrow = 93961, ncol = length(rest_minProc.fix.gsr[[4]]))
+
+colnames(cormat1) <- names(rest_minProc.fix.gsr[[1]])
+colnames(cormat2) <- names(rest_minProc.fix.gsr[[2]])
+colnames(cormat3) <- names(rest_minProc.fix.gsr[[3]])
+colnames(cormat4) <- names(rest_minProc.fix.gsr[[4]])
+
+for (l in 1:length(rest_minProc.fix.gsr[[1]])) {
+  cormat1[, l] <- mat_2_vec(rest_minProc.fix.gsr[[1]][[l]])
+}
+mat1 <- cor2(cormat1)
+
+for (l in 1:length(rest_minProc.fix.gsr[[2]])) {
+  cormat2[, l] <- mat_2_vec(rest_minProc.fix.gsr[[2]][[l]])
+}
+
+mat2 <- cor2(cormat2)
+for (l in 1:length(rest_minProc.fix.gsr[[3]])) {
+  cormat3[, l] <- mat_2_vec(rest_minProc.fix.gsr[[3]][[l]])
+}
+mat3 <- cor2(cormat3)
+
+for (l in 1:length(rest_minProc.fix.gsr[[4]])) {
+  cormat4[, l] <- mat_2_vec(rest_minProc.fix.gsr[[4]][[l]])
+}
+mat4 <- cor2(cormat4)
+
+pheatmap::pheatmap(mat4, cluster_rows = F, cluster_cols = F)
+
+matrices <- list(mat1, mat2, mat3, mat4)
+all_row_names <- unique(unlist(lapply(matrices, rownames)))
+all_col_names <- unique(unlist(lapply(matrices, colnames)))
+
+template_matrix <- matrix(0, nrow = length(all_row_names), ncol = length(all_col_names))
+rownames(template_matrix) <- all_row_names
+colnames(template_matrix) <- all_col_names
+
+
+for (matrix in matrices) {
+  common_rows <- intersect(rownames(matrix), all_row_names)
+  common_cols <- intersect(colnames(matrix), all_col_names)
+  template_matrix[common_rows, common_cols] <- template_matrix[common_rows, common_cols] + matrix[common_rows, common_cols]
+}
+
+# Divide by the number of matrices that contributed to each element
+for (row in all_row_names) {
+  for (col in all_col_names) {
+    count <- sum(sapply(matrices, function(matrix) {
+      row %in% rownames(matrix) && col %in% colnames(matrix)
+    }))
+    if (count > 0) {
+      template_matrix[row, col] <- template_matrix[row, col] / count
+    }
+  }
+}
+diag(template_matrix) <- 1
+
+sub2sub_minProc.fix.gsr <- template_matrix
+```
+
+```{r subject to subject homogeniety minProc.fix unused}
+combined_lists <- list()
+cormat1 <- matrix(nrow = 93961, ncol = length(rest_minProc.fix[[1]]))
+cormat2 <- matrix(nrow = 93961, ncol = length(rest_minProc.fix[[2]]))
+cormat3 <- matrix(nrow = 93961, ncol = length(rest_minProc.fix[[3]]))
+cormat4 <- matrix(nrow = 93961, ncol = length(rest_minProc.fix[[4]]))
+colnames(cormat1) <- names(rest_minProc.fix[[1]])
+colnames(cormat2) <- names(rest_minProc.fix[[2]])
+colnames(cormat3) <- names(rest_minProc.fix[[3]])
+colnames(cormat4) <- names(rest_minProc.fix[[4]])
+
+for (l in 1:length(rest_minProc.fix[[1]])) {
+  cormat1[, l] <- mat_2_vec(rest_minProc.fix[[1]][[l]])
+}
+mat1 <- cor2(cormat1)
+
+for (l in 1:length(rest_minProc.fix[[2]])) {
+  cormat2[, l] <- mat_2_vec(rest_minProc.fix[[2]][[l]])
+}
+
+mat2 <- cor2(cormat2)
+for (l in 1:length(rest_minProc.fix[[3]])) {
+  cormat3[, l] <- mat_2_vec(rest_minProc.fix[[3]][[l]])
+}
+mat3 <- cor2(cormat3)
+
+for (l in 1:length(rest_minProc.fix[[4]])) {
+  cormat4[, l] <- mat_2_vec(rest_minProc.fix[[4]][[l]])
+}
+mat4 <- cor2(cormat4)
+
+pheatmap::pheatmap(mat4, cluster_rows = F, cluster_cols = F)
+
+matrices <- list(mat1, mat2, mat3, mat4)
+all_row_names <- unique(unlist(lapply(matrices, rownames)))
+all_col_names <- unique(unlist(lapply(matrices, colnames)))
+
+template_matrix <- matrix(0, nrow = length(all_row_names), ncol = length(all_col_names))
+rownames(template_matrix) <- all_row_names
+colnames(template_matrix) <- all_col_names
+
+
+for (matrix in matrices) {
+  common_rows <- intersect(rownames(matrix), all_row_names)
+  common_cols <- intersect(colnames(matrix), all_col_names)
+  template_matrix[common_rows, common_cols] <- template_matrix[common_rows, common_cols] + matrix[common_rows, common_cols]
+}
+
+# Divide by the number of matrices that contributed to each element
+for (row in all_row_names) {
+  for (col in all_col_names) {
+    count <- sum(sapply(matrices, function(matrix) {
+      row %in% rownames(matrix) && col %in% colnames(matrix)
+    }))
+    if (count > 0) {
+      template_matrix[row, col] <- template_matrix[row, col] / count
+    }
+  }
+}
+diag(template_matrix) <- 1
+sub2sub_minProc.fix <- template_matrix
+```
+
+
+```{r subject to subject homogeniety minProc unused}
+combined_lists <- list()
+cormat1 <- matrix(nrow = 93961, ncol = length(rest_minProc[[1]]))
+cormat2 <- matrix(nrow = 93961, ncol = length(rest_minProc[[2]]))
+cormat3 <- matrix(nrow = 93961, ncol = length(rest_minProc[[3]]))
+cormat4 <- matrix(nrow = 93961, ncol = length(rest_minProc[[4]]))
+colnames(cormat1) <- names(rest_minProc[[1]])
+colnames(cormat2) <- names(rest_minProc[[2]])
+colnames(cormat3) <- names(rest_minProc[[3]])
+colnames(cormat4) <- names(rest_minProc[[4]])
+
+for (l in 1:length(rest_minProc[[1]])) {
+  cormat1[, l] <- mat_2_vec(rest_minProc[[1]][[l]])
+}
+mat1 <- cor2(cormat1)
+
+for (l in 1:length(rest_minProc[[2]])) {
+  cormat2[, l] <- mat_2_vec(rest_minProc[[2]][[l]])
+}
+
+mat2 <- cor2(cormat2)
+for (l in 1:length(rest_minProc[[3]])) {
+  cormat3[, l] <- mat_2_vec(rest_minProc[[3]][[l]])
+}
+mat3 <- cor2(cormat3)
+
+for (l in 1:length(rest_minProc[[4]])) {
+  cormat4[, l] <- mat_2_vec(rest_minProc[[4]][[l]])
+}
+mat4 <- cor2(cormat4)
+
+pheatmap::pheatmap(mat4, cluster_rows = F, cluster_cols = F)
+
+matrices <- list(mat1, mat2, mat3, mat4)
+all_row_names <- unique(unlist(lapply(matrices, rownames)))
+all_col_names <- unique(unlist(lapply(matrices, colnames)))
+
+template_matrix <- matrix(0, nrow = length(all_row_names), ncol = length(all_col_names))
+rownames(template_matrix) <- all_row_names
+colnames(template_matrix) <- all_col_names
+
+
+for (matrix in matrices) {
+  common_rows <- intersect(rownames(matrix), all_row_names)
+  common_cols <- intersect(colnames(matrix), all_col_names)
+  template_matrix[common_rows, common_cols] <- template_matrix[common_rows, common_cols] + matrix[common_rows, common_cols]
+}
+
+# Divide by the number of matrices that contributed to each element
+for (row in all_row_names) {
+  for (col in all_col_names) {
+    count <- sum(sapply(matrices, function(matrix) {
+      row %in% rownames(matrix) && col %in% colnames(matrix)
+    }))
+    if (count > 0) {
+      template_matrix[row, col] <- template_matrix[row, col] / count
+    }
+  }
+}
+diag(template_matrix) <- 1
+sub2sub_minProc <- template_matrix
+```
+
+```{r plot rest sub2sub unused}
+p1 <- plot_matrix(sub2sub_minProc, colour.pal = pals::brewer.reds(1000), heat.lim = c(0, 1), cluster = T)
+p2 <- plot_matrix(sub2sub_minProc.fix, colour.pal = pals::brewer.reds(1000), heat.lim = c(0, 1), cluster = T)
+p3 <- plot_matrix(sub2sub_minProc.fix.gsr, colour.pal = pals::brewer.reds(1000), heat.lim = c(0, 1), cluster = T)
+```
